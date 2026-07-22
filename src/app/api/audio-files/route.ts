@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { getCanonicalMimeType, MAX_AUDIO_UPLOAD_BYTES } from "@/lib/audio/limits";
 import { createAudioFile, listAudioFiles } from "@/lib/db/queries";
 import { createDownloadUrl } from "@/lib/storage";
 import type { AudioFileWithPlaybackUrl } from "@/types/domain";
@@ -34,11 +35,23 @@ export async function POST(request: Request) {
     );
   }
 
+  const canonicalMimeType = getCanonicalMimeType(parsed.data.filename);
+  if (!canonicalMimeType) {
+    return NextResponse.json({ error: "Unsupported audio type" }, { status: 400 });
+  }
+
+  if (parsed.data.sizeBytes > MAX_AUDIO_UPLOAD_BYTES) {
+    return NextResponse.json(
+      { error: `File exceeds maximum allowed size of ${MAX_AUDIO_UPLOAD_BYTES} bytes` },
+      { status: 400 }
+    );
+  }
+
   const audioFile = await createAudioFile({
     filename: parsed.data.filename,
     sizeBytes: parsed.data.sizeBytes,
     r2Key: parsed.data.r2Key,
-    mimeType: parsed.data.mimeType,
+    mimeType: canonicalMimeType,
     category: parsed.data.category ?? null,
     tags: parsed.data.tags ?? [],
   });

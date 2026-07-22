@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local dev fallback for audio file storage (used when R2 isn't configured)
+/.local-storage/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

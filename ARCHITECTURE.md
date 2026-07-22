@@ -130,6 +130,24 @@ filöverföringen — bara metadata gör det. Flöde:
 Detta undviker Vercel-funktionernas gränser för payload-storlek och
 körtid helt för filöverföring.
 
+**Validering:** endast mp3/wav/ogg tillåts (kontrolleras på filändelsen,
+inte webbläsarens `Content-Type`, som är opålitlig för wav/ogg), och max
+filstorlek är 105 MB (`MAX_AUDIO_UPLOAD_BYTES` i `src/lib/audio/limits.ts`).
+Storleken skickas med i begäran om uppladdnings-URL och kontrolleras igen
+när filen registreras.
+
+**Lokal utveckling utan R2:** om `R2_ACCOUNT_ID` inte är satt växlar
+`src/lib/storage/index.ts` automatiskt till en lokal disk-driver
+(`src/lib/storage/local.ts`) — "presignerade" uppladdnings-URL:er blir då
+signerade (`jose`/`SESSION_SECRET`) länkar till
+`PUT /api/audio-files/local-upload/[token]`, som skriver till
+`LOCAL_STORAGE_DIR` (default `.local-storage/`, gitignorad), och
+uppspelning sker via `GET /api/audio-files/local-file/[key]`. Samma
+frontend-kod (presigned-URL → `PUT` → registrera) fungerar oförändrat mot
+båda drivrutinerna. Ett alternativ till disk är att peka R2-klienten mot en
+lokal MinIO-instans (S3-kompatibel) — sätt då `R2_*`-variablerna mot
+MinIO:s endpoint/nycklar istället.
+
 ## 5. Ljudmotor (klient, Web Audio API)
 
 `src/audio-engine/` — ingen `<audio>`-tagg, allt går via `AudioContext` för
@@ -181,9 +199,12 @@ PATCH  /api/scenes/:id/music-slots/:slotIndex     Uppdatera slot (audio_file_id,
 PATCH  /api/scenes/:id/oneshot-slots/:slotIndex   Uppdatera slot (audio_file_id, volym, färg/ikon)
 
 GET    /api/audio-files                Lista uppladdade filer
-POST   /api/audio-files/upload-url     Begär presignerad R2-uppladdnings-URL
+POST   /api/audio-files/upload-url     Begär presignerad uppladdnings-URL (R2 eller lokal)
 POST   /api/audio-files                Registrera fil efter uppladdning
-DELETE /api/audio-files/:id            Radera fil (metadata + R2-objekt)
+DELETE /api/audio-files/:id            Radera fil (metadata + lagringsobjekt)
+
+PUT    /api/audio-files/local-upload/:token   Endast lokal disk-drivrutin (dev utan R2)
+GET    /api/audio-files/local-file/:key       Endast lokal disk-drivrutin (dev utan R2)
 ```
 
 ## 8. Mappstruktur
@@ -215,10 +236,11 @@ Miljövariabler:
 
 ```
 DATABASE_URL              Neon-anslutningssträng
-R2_ACCOUNT_ID
+R2_ACCOUNT_ID              Lämnas tom lokalt för att falla tillbaka på lokal disk
 R2_ACCESS_KEY_ID
 R2_SECRET_ACCESS_KEY
 R2_BUCKET_NAME
+LOCAL_STORAGE_DIR          Valfri, endast lokal disk-drivrutin (default .local-storage/)
 AUTH_PASSWORD_HASH         bcrypt/scrypt-hash av lösenordet
 SESSION_SECRET             HMAC-nyckel för signering av sessionscookien
 ```
