@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AudioEngine, type EngineState, type FadeCurve } from "./AudioEngine";
 
-const EMPTY_STATE: EngineState = { tracks: {}, masterVolume: 1 };
+const EMPTY_STATE: EngineState = { tracks: {}, oneShots: {}, masterVolume: 1 };
 
 export function useAudioEngine() {
   const [engine] = useState(() => new AudioEngine());
@@ -58,8 +58,23 @@ export function useAudioEngine() {
     [engine],
   );
 
+  const loadOneShot = useCallback(
+    async (id: string, file: File) => {
+      const data = await file.arrayBuffer();
+      await engine.loadOneShot(id, file.name, data);
+    },
+    [engine],
+  );
+  const triggerOneShot = useCallback((id: string) => engine.triggerOneShot(id), [engine]);
+  const setOneShotVolume = useCallback(
+    (id: string, volume: number) => engine.setOneShotVolume(id, volume),
+    [engine],
+  );
+  const removeOneShotSlot = useCallback((id: string) => engine.removeOneShotSlot(id), [engine]);
+
   return {
     tracks: state.tracks,
+    oneShots: state.oneShots,
     masterVolume: state.masterVolume,
     loadTrack,
     play,
@@ -72,5 +87,9 @@ export function useAudioEngine() {
     fadeOut,
     crossfade,
     setMasterVolume,
+    loadOneShot,
+    triggerOneShot,
+    setOneShotVolume,
+    removeOneShotSlot,
   };
 }

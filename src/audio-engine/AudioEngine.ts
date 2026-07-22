@@ -11,8 +11,18 @@ export type TrackState = {
   fading: boolean;
 };
 
+export type OneShotState = {
+  id: string;
+  name: string;
+  duration: number;
+  volume: number;
+  /** How many overlapping instances of this slot are currently playing. */
+  activeCount: number;
+};
+
 export type EngineState = {
   tracks: Record<string, TrackState>;
+  oneShots: Record<string, OneShotState>;
   masterVolume: number;
 };
 
@@ -31,6 +41,15 @@ type Track = {
   fadeTimer: ReturnType<typeof setTimeout> | null;
 };
 
+type OneShotSlot = {
+  name: string;
+  buffer: AudioBuffer;
+  /** Shared by every overlapping instance of this slot, so slot volume affects all of them at once. */
+  gainNode: GainNode;
+  volume: number;
+  activeSources: Set<AudioBufferSourceNode>;
+};
+
 type Listener = (state: EngineState) => void;
 
 /** exponentialRampToValueAtTime rejects a target/start of exactly 0. */
@@ -44,14 +63,18 @@ const MIN_GAIN = 0.0001;
  *
  * Designed for a scene's music slots: multiple tracks can play concurrently,
  * each with its own fade in/out and volume, and can be crossfaded into one
- * another. The engine itself has no fixed slot limit — the 10-slots-per-scene
- * rule lives in the data model, not here.
+ * another. One-shot slots are a separate, simpler concept: triggerOneShot()
+ * always creates a new fire-and-forget source, so overlapping and rapid
+ * re-triggering of the same slot just works. The engine itself has no fixed
+ * slot limit — the 10/20-slots-per-scene rule lives in the data model, not
+ * here.
  */
 export class AudioEngine {
   private audioContext: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private masterVolume = 1;
   private tracks = new Map<string, Track>();
+  private oneShots = new Map<string, OneShotSlot>();
   private listeners = new Set<Listener>();
 
   private ensureContext(): AudioContext {
@@ -71,6 +94,12 @@ export class AudioEngine {
     const track = this.tracks.get(id);
     if (!track) throw new Error(`Unknown track: ${id}`);
     return track;
+  }
+
+  private getOneShotSlot(id: string): OneShotSlot {
+    const slot = this.oneShots.get(id);
+    if (!slot) throw new Error(`Unknown one-shot slot: ${id}`);
+    return slot;
   }
 
   private clearFadeTimer(track: Track): void {
@@ -104,7 +133,18 @@ export class AudioEngine {
         fading: track.fadeTimer !== null,
       };
     }
-    return { tracks, masterVolume: this.masterVolume };
+    const oneShots: Record<string, OneShotState> = {};
+    for (const [id, slot] of this.oneShots) {
+      oneShots[id] = {
+        id,
+        name: slot.name,
+        duration: slot.buffer.duration,
+        volume: slot.volume,
+        activeCount: slot.activeSources.size,
+      };
+    }
+
+    return { tracks, oneShots, masterVolume: this.masterVolume };
   }
 
   async loadTrack(id: string, name: string, data: ArrayBuffer): Promise<void> {
@@ -128,6 +168,70 @@ export class AudioEngine {
       startedAt: 0,
       fadeTimer: null,
     });
+    this.notify();
+  }
+
+  async loadOneShot(id: string, name: string, data: ArrayBuffer): Promise<void> {
+    // Same replace-in-place rule as loadTrack: re-assigning a slot stops
+    // whatever was previously triggered from it.
+    if (this.oneShots.has(id)) this.removeOneShotSlot(id);
+
+    const ctx = this.ensureContext();
+    const buffer = await ctx.decodeAudioData(data);
+    const gainNode = ctx.createGain();
+    gainNode.connect(this.masterGain!);
+    this.oneShots.set(id, {
+      name,
+      buffer,
+      gainNode,
+      volume: 1,
+      activeSources: new Set(),
+    });
+    this.notify();
+  }
+
+  /**
+   * Fires a brand-new, independent instance of the slot's sound. Never
+   * touches instances already in flight — repeated triggers (even of the
+   * same slot, even before the previous instance finished) overlap freely
+   * and each cleans itself up via onended.
+   */
+  triggerOneShot(id: string): void {
+    const slot = this.getOneShotSlot(id);
+    const ctx = this.ensureContext();
+    const source = ctx.createBufferSource();
+    source.buffer = slot.buffer;
+    source.connect(slot.gainNode);
+    slot.activeSources.add(source);
+    source.onended = () => {
+      slot.activeSources.delete(source);
+      source.disconnect();
+      this.notify();
+    };
+    source.start(0);
+    this.notify();
+  }
+
+  /** Volume applied to every current and future instance of this one-shot slot. */
+  setOneShotVolume(id: string, volume: number): void {
+    const slot = this.getOneShotSlot(id);
+    const clamped = Math.min(1, Math.max(0, volume));
+    slot.volume = clamped;
+    slot.gainNode.gain.setValueAtTime(clamped, this.ensureContext().currentTime);
+    this.notify();
+  }
+
+  removeOneShotSlot(id: string): void {
+    const slot = this.oneShots.get(id);
+    if (!slot) return;
+    for (const source of slot.activeSources) {
+      source.onended = null;
+      source.stop();
+      source.disconnect();
+    }
+    slot.activeSources.clear();
+    slot.gainNode.disconnect();
+    this.oneShots.delete(id);
     this.notify();
   }
 
@@ -330,6 +434,7 @@ export class AudioEngine {
 
   dispose(): void {
     for (const id of [...this.tracks.keys()]) this.removeTrack(id);
+    for (const id of [...this.oneShots.keys()]) this.removeOneShotSlot(id);
     this.listeners.clear();
     void this.audioContext?.close();
     this.audioContext = null;
