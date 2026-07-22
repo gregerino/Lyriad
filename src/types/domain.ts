@@ -26,10 +26,13 @@ export type AudioFile = {
   filename: string;
   sizeBytes: number;
   r2Key: string;
+  mimeType: string;
   category: string | null;
   tags: string[];
   createdAt: string;
 };
+
+export type AudioFileWithPlaybackUrl = AudioFile & { playbackUrl: string };
 
 export type Scene = {
   id: string;
