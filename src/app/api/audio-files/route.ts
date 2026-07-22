@@ -1,27 +1,63 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getCanonicalMimeType, MAX_AUDIO_UPLOAD_BYTES } from "@/lib/audio/limits";
-import { createAudioFile, listAudioFiles } from "@/lib/db/queries";
+import { AUDIO_CATEGORIES, getCanonicalMimeType, MAX_AUDIO_UPLOAD_BYTES } from "@/lib/audio/limits";
+import {
+  bulkUpdateAudioFileTags,
+  createAudioFile,
+  listAudioFileCollectionIds,
+  listAudioFiles,
+} from "@/lib/db/queries";
 import { createDownloadUrl } from "@/lib/storage";
-import type { AudioFileWithPlaybackUrl } from "@/types/domain";
+import type { AudioFileWithMeta } from "@/types/domain";
 
 const registerSchema = z.object({
   filename: z.string().trim().min(1).max(255),
   sizeBytes: z.number().int().positive(),
   r2Key: z.string().trim().min(1),
   mimeType: z.string().trim().min(1),
-  category: z.string().trim().max(100).nullable().optional(),
+  category: z.enum(AUDIO_CATEGORIES).nullable().optional(),
   tags: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
 });
 
+const bulkUpdateTagsSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1),
+  add: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
+  remove: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
+});
+
 export async function GET() {
-  const files = await listAudioFiles();
-  const audioFiles: AudioFileWithPlaybackUrl[] = await Promise.all(
+  const [files, collectionIdsByFile] = await Promise.all([
+    listAudioFiles(),
+    listAudioFileCollectionIds(),
+  ]);
+  const audioFiles: AudioFileWithMeta[] = await Promise.all(
     files.map(async (file) => ({
       ...file,
       playbackUrl: await createDownloadUrl(file.r2Key),
+      collectionIds: collectionIdsByFile.get(file.id) ?? [],
     }))
   );
+  return NextResponse.json({ audioFiles });
+}
+
+export async function PATCH(request: Request) {
+  const body = await request.json().catch(() => null);
+  const parsed = bulkUpdateTagsSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid bulk update payload", issues: parsed.error.issues },
+      { status: 400 }
+    );
+  }
+
+  if (!parsed.data.add?.length && !parsed.data.remove?.length) {
+    return NextResponse.json({ error: "No tag changes to apply" }, { status: 400 });
+  }
+
+  const audioFiles = await bulkUpdateAudioFileTags(parsed.data.ids, {
+    add: parsed.data.add,
+    remove: parsed.data.remove,
+  });
   return NextResponse.json({ audioFiles });
 }
 

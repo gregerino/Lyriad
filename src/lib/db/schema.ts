@@ -12,18 +12,48 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-export const audioFiles = pgTable("audio_files", {
+export const audioFiles = pgTable(
+  "audio_files",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    filename: text("filename").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    r2Key: text("r2_key").notNull().unique(),
+    mimeType: text("mime_type").notNull(),
+    category: text("category"),
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "audio_files_category_check",
+      sql`${table.category} IS NULL OR ${table.category} IN ('music', 'oneshot')`
+    ),
+  ]
+);
+
+export const collections = pgTable("collections", {
   id: uuid("id").primaryKey().defaultRandom(),
-  filename: text("filename").notNull(),
-  sizeBytes: integer("size_bytes").notNull(),
-  r2Key: text("r2_key").notNull().unique(),
-  mimeType: text("mime_type").notNull(),
-  category: text("category"),
-  tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+  name: text("name").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
 });
+
+export const audioFileCollections = pgTable(
+  "audio_file_collections",
+  {
+    audioFileId: uuid("audio_file_id")
+      .notNull()
+      .references(() => audioFiles.id, { onDelete: "cascade" }),
+    collectionId: uuid("collection_id")
+      .notNull()
+      .references(() => collections.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.audioFileId, table.collectionId] })]
+);
 
 export const scenes = pgTable("scenes", {
   id: uuid("id").primaryKey().defaultRandom(),

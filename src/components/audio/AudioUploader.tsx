@@ -2,11 +2,14 @@
 
 import { useRef, useState } from "react";
 import {
+  AUDIO_CATEGORIES,
+  AUDIO_CATEGORY_LABELS,
   formatBytes,
   isAllowedAudioFilename,
   MAX_AUDIO_UPLOAD_BYTES,
 } from "@/lib/audio/limits";
-import type { AudioFile, Scene } from "@/types/domain";
+import type { AudioCategory, AudioFile, Scene } from "@/types/domain";
+import { TagEditor } from "./TagEditor";
 import { uploadWithProgress } from "./uploadWithProgress";
 
 type FreeSlot = { kind: "music" | "oneshot"; slotIndex: number };
@@ -23,7 +26,8 @@ type Status =
 type AudioUploaderProps = {
   /** When set, a successful upload offers to assign the file to a free slot on this scene. */
   sceneId?: string;
-  category?: string | null;
+  /** When set, locks the category to this value and hides the category selector. */
+  category?: AudioCategory | null;
   onUploaded?: (audioFile: AudioFile) => void;
   onAssigned?: (info: { slot: FreeSlot; audioFile: AudioFile }) => void;
 };
@@ -35,6 +39,10 @@ function slotLabel(slot: FreeSlot): string {
 export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: AudioUploaderProps) {
   const [status, setStatus] = useState<Status>({ step: "idle" });
   const [dragActive, setDragActive] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<AudioCategory | null>(null);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const categoryLocked = category !== undefined;
+  const effectiveCategory = categoryLocked ? category : selectedCategory;
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function computeFreeSlots(): Promise<FreeSlot[]> {
@@ -92,7 +100,8 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
           sizeBytes: file.size,
           r2Key,
           mimeType,
-          category: category ?? null,
+          category: effectiveCategory ?? null,
+          tags: selectedTags,
         }),
       });
       if (!registerRes.ok) {
@@ -145,11 +154,39 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
 
   function reset() {
     setStatus({ step: "idle" });
+    setSelectedTags([]);
+    if (!categoryLocked) setSelectedCategory(null);
     if (inputRef.current) inputRef.current.value = "";
   }
 
   return (
     <div className="flex w-full flex-col gap-3 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      {(status.step === "idle" || status.step === "error") && (
+        <div className="flex flex-col gap-3">
+          {!categoryLocked && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-zinc-400">Typ:</span>
+              {AUDIO_CATEGORIES.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setSelectedCategory(selectedCategory === c ? null : c)}
+                  className={`rounded-md border px-2.5 py-1 ${
+                    selectedCategory === c
+                      ? "border-amber-400 text-amber-400"
+                      : "border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                  }`}
+                >
+                  {AUDIO_CATEGORY_LABELS[c]}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5">
+            <TagEditor tags={selectedTags} onChange={setSelectedTags} placeholder="Taggar…" />
+          </div>
+        </div>
+      )}
       {(status.step === "idle" || status.step === "error") && (
         <div
           onDragOver={(e) => {

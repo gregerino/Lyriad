@@ -21,18 +21,28 @@ export type OneShotSlot = {
   icon: string | null;
 };
 
+export type AudioCategory = "music" | "oneshot";
+
 export type AudioFile = {
   id: string;
   filename: string;
   sizeBytes: number;
   r2Key: string;
   mimeType: string;
-  category: string | null;
+  category: AudioCategory | null;
   tags: string[];
   createdAt: string;
 };
 
 export type AudioFileWithPlaybackUrl = AudioFile & { playbackUrl: string };
+
+export type AudioFileWithMeta = AudioFileWithPlaybackUrl & { collectionIds: string[] };
+
+export type Collection = {
+  id: string;
+  name: string;
+  createdAt: string;
+};
 
 export type Scene = {
   id: string;

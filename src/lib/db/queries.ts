@@ -1,8 +1,22 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "./index";
-import { audioFiles, sceneMusicSlots, sceneOneshotSlots, scenes } from "./schema";
-import type { AudioFile, MusicSlot, OneShotSlot, Scene } from "@/types/domain";
+import {
+  audioFileCollections,
+  audioFiles,
+  collections,
+  sceneMusicSlots,
+  sceneOneshotSlots,
+  scenes,
+} from "./schema";
+import type {
+  AudioCategory,
+  AudioFile,
+  Collection,
+  MusicSlot,
+  OneShotSlot,
+  Scene,
+} from "@/types/domain";
 
 const MUSIC_SLOT_COUNT = 10;
 const ONESHOT_SLOT_COUNT = 20;
@@ -36,8 +50,16 @@ export function toAudioFile(row: typeof audioFiles.$inferSelect): AudioFile {
     sizeBytes: row.sizeBytes,
     r2Key: row.r2Key,
     mimeType: row.mimeType,
-    category: row.category,
+    category: row.category as AudioCategory | null,
     tags: row.tags,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function toCollection(row: typeof collections.$inferSelect): Collection {
+  return {
+    id: row.id,
+    name: row.name,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -251,4 +273,118 @@ export async function createAudioFile(input: {
 export async function deleteAudioFile(id: string): Promise<AudioFile | null> {
   const [row] = await db.delete(audioFiles).where(eq(audioFiles.id, id)).returning();
   return row ? toAudioFile(row) : null;
+}
+
+export async function updateAudioFile(
+  id: string,
+  patch: Partial<{ category: AudioCategory | null; tags: string[] }>
+): Promise<AudioFile | null> {
+  const [row] = await db
+    .update(audioFiles)
+    .set(patch)
+    .where(eq(audioFiles.id, id))
+    .returning();
+  return row ? toAudioFile(row) : null;
+}
+
+export async function bulkUpdateAudioFileTags(
+  ids: string[],
+  changes: { add?: string[]; remove?: string[] }
+): Promise<AudioFile[]> {
+  const rows = await db.select().from(audioFiles).where(inArray(audioFiles.id, ids));
+  if (rows.length === 0) return [];
+
+  const add = changes.add ?? [];
+  const remove = new Set(changes.remove ?? []);
+
+  const updates = rows.map((row) => {
+    const nextTags = new Set(row.tags.filter((tag) => !remove.has(tag)));
+    for (const tag of add) nextTags.add(tag);
+    return db
+      .update(audioFiles)
+      .set({ tags: Array.from(nextTags) })
+      .where(eq(audioFiles.id, row.id))
+      .returning();
+  });
+
+  const results = await db.batch(
+    updates as [(typeof updates)[number], ...(typeof updates)[number][]]
+  );
+  return results.map(([row]) => toAudioFile(row));
+}
+
+export async function listAudioFileCollectionIds(): Promise<Map<string, string[]>> {
+  const rows = await db
+    .select({
+      audioFileId: audioFileCollections.audioFileId,
+      collectionId: audioFileCollections.collectionId,
+    })
+    .from(audioFileCollections);
+
+  const map = new Map<string, string[]>();
+  for (const row of rows) {
+    const existing = map.get(row.audioFileId);
+    if (existing) existing.push(row.collectionId);
+    else map.set(row.audioFileId, [row.collectionId]);
+  }
+  return map;
+}
+
+export async function listCollections(): Promise<Collection[]> {
+  const rows = await db.select().from(collections).orderBy(asc(collections.createdAt));
+  return rows.map(toCollection);
+}
+
+export async function createCollection(name: string): Promise<Collection> {
+  const [row] = await db.insert(collections).values({ name }).returning();
+  return toCollection(row);
+}
+
+export async function deleteCollection(id: string): Promise<boolean> {
+  const [row] = await db
+    .delete(collections)
+    .where(eq(collections.id, id))
+    .returning({ id: collections.id });
+  return !!row;
+}
+
+export async function collectionExists(id: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: collections.id })
+    .from(collections)
+    .where(eq(collections.id, id))
+    .limit(1);
+  return !!row;
+}
+
+export async function setCollectionMembers(
+  collectionId: string,
+  changes: { add?: string[]; remove?: string[] }
+): Promise<void> {
+  const operations = [];
+
+  if (changes.remove && changes.remove.length > 0) {
+    operations.push(
+      db
+        .delete(audioFileCollections)
+        .where(
+          and(
+            eq(audioFileCollections.collectionId, collectionId),
+            inArray(audioFileCollections.audioFileId, changes.remove)
+          )
+        )
+    );
+  }
+
+  if (changes.add && changes.add.length > 0) {
+    operations.push(
+      db
+        .insert(audioFileCollections)
+        .values(changes.add.map((audioFileId) => ({ audioFileId, collectionId })))
+        .onConflictDoNothing()
+    );
+  }
+
+  if (operations.length === 0) return;
+  await db.batch(operations as [(typeof operations)[number], ...(typeof operations)[number][]]);
 }
