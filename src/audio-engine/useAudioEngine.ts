@@ -1,14 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AudioEngine, type TrackState } from "./AudioEngine";
+import { AudioEngine, type EngineState, type FadeCurve } from "./AudioEngine";
+
+const EMPTY_STATE: EngineState = { tracks: {}, masterVolume: 1 };
 
 export function useAudioEngine() {
   const [engine] = useState(() => new AudioEngine());
-  const [tracks, setTracks] = useState<Record<string, TrackState>>({});
+  const [state, setState] = useState<EngineState>(EMPTY_STATE);
 
   useEffect(() => {
-    const unsubscribe = engine.subscribe(setTracks);
+    const unsubscribe = engine.subscribe(setState);
     return () => {
       unsubscribe();
       engine.dispose();
@@ -32,6 +34,43 @@ export function useAudioEngine() {
   );
   const setLoop = useCallback((id: string, loop: boolean) => engine.setLoop(id, loop), [engine]);
   const removeTrack = useCallback((id: string) => engine.removeTrack(id), [engine]);
+  const fadeIn = useCallback(
+    (id: string, durationMs: number, options?: { targetVolume?: number; curve?: FadeCurve }) =>
+      engine.fadeIn(id, durationMs, options),
+    [engine],
+  );
+  const fadeOut = useCallback(
+    (id: string, durationMs: number, options?: { curve?: FadeCurve; stop?: boolean }) =>
+      engine.fadeOut(id, durationMs, options),
+    [engine],
+  );
+  const crossfade = useCallback(
+    (
+      fromId: string,
+      toId: string,
+      durationMs: number,
+      options?: { curve?: FadeCurve; targetVolume?: number },
+    ) => engine.crossfade(fromId, toId, durationMs, options),
+    [engine],
+  );
+  const setMasterVolume = useCallback(
+    (volume: number) => engine.setMasterVolume(volume),
+    [engine],
+  );
 
-  return { tracks, loadTrack, play, pause, stop, setVolume, setLoop, removeTrack };
+  return {
+    tracks: state.tracks,
+    masterVolume: state.masterVolume,
+    loadTrack,
+    play,
+    pause,
+    stop,
+    setVolume,
+    setLoop,
+    removeTrack,
+    fadeIn,
+    fadeOut,
+    crossfade,
+    setMasterVolume,
+  };
 }
