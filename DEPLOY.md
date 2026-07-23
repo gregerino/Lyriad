@@ -73,6 +73,16 @@ Vercel-funktioner blir en flaskhals, oavsett filstorlek — max filstorlek
 [`src/lib/audio/limits.ts`](src/lib/audio/limits.ts)) styrs av appens egen
 validering, inte av plattformen. Inget behöver justeras här för deploy.
 
+**Kom ihåg CORS på bucketen** — utan det får du "Nätverksfel under
+uppladdning" i webbläsaren trots att R2-nycklarna är korrekta, eftersom
+`PUT` går direkt från klienten till R2 och webbläsaren blockerar preflighten
+om bucketen inte tillåter din origin. I Cloudflare-dashboarden: **R2 →
+bucketen → Settings → CORS Policy**, lägg till både `http://localhost:3000`
+och din produktions-URL (`https://lyriad.vercel.app`) i
+`AllowedOrigins` med `AllowedMethods: ["PUT"]`. Se
+[ARCHITECTURE.md §4](ARCHITECTURE.md#4-ljudfillagring-cloudflare-r2) för
+exempel-JSON. Gäller direkt, ingen redeploy behövs.
+
 Undantaget är den lokala disk-drivrutinen
 (`/api/audio-files/local-upload/[token]`), som **går** genom en Vercel-
 funktion och skriver till filsystemet — den är bara till för lokal dev utan

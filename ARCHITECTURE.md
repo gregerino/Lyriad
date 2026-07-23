@@ -130,6 +130,27 @@ filöverföringen — bara metadata gör det. Flöde:
 Detta undviker Vercel-funktionernas gränser för payload-storlek och
 körtid helt för filöverföring.
 
+**CORS på bucketen (obligatoriskt):** eftersom `PUT` går direkt från
+webbläsaren till R2 måste bucketen ha en CORS-policy som tillåter det —
+annars blockerar webbläsaren preflighten och uppladdningen dör med ett
+generiskt nätverksfel (ingen tydlig HTTP-status, eftersom requesten aldrig
+når R2). Sätts i Cloudflare-dashboarden: **R2 → bucket → Settings → CORS
+Policy**:
+
+```json
+[
+  {
+    "AllowedOrigins": ["http://localhost:3000", "https://lyriad.vercel.app"],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["Content-Type"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+Gäller direkt utan redeploy. R2 stödjer inte wildcard-origins, så lägg till
+varje domän (prod + ev. preview-URL:er) explicit.
+
 **Validering:** endast mp3/wav/ogg tillåts (kontrolleras på filändelsen,
 inte webbläsarens `Content-Type`, som är opålitlig för wav/ogg), och max
 filstorlek är 105 MB (`MAX_AUDIO_UPLOAD_BYTES` i `src/lib/audio/limits.ts`).
