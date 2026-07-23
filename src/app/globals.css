@@ -1,28 +1,116 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+ * Lyriad design system
+ * Dark, atmospheric, "handcrafted but polished" — stone and parchment as an
+ * idea, not a literal texture. Cool near-black base (a hint of deep blue),
+ * warm gold/copper/ember accents for anything interactive.
+ */
+
+@theme {
+  /* ---- ink: the near-black base scale, cool blue undertone ---- */
+  --color-ink-50: #eef0f5;
+  --color-ink-100: #dbdee7;
+  --color-ink-200: #b6bccd;
+  --color-ink-300: #8a90a8;
+  --color-ink-400: #656b85;
+  --color-ink-500: #4b4f66;
+  --color-ink-600: #383b4d;
+  --color-ink-700: #262838;
+  --color-ink-800: #191a26;
+  --color-ink-850: #14151f;
+  --color-ink-900: #0f1018;
+  --color-ink-950: #090a10;
+
+  /* ---- ember: gold -> copper -> glowing orange, the warm accent scale ---- */
+  --color-ember-50: #fdf3e1;
+  --color-ember-100: #fbe4bb;
+  --color-ember-200: #f7c988;
+  --color-ember-300: #f2ab57;
+  --color-ember-400: #ec8a3a;
+  --color-ember-500: #d97128;
+  --color-ember-600: #b85a20;
+  --color-ember-700: #8f461d;
+  --color-ember-800: #6b371c;
+  --color-ember-900: #4a2717;
+  --color-ember-950: #2a150d;
+
+  /* ---- parchment: warm off-white/tan scale, used for text ---- */
+  --color-parchment-50: #f8f2e6;
+  --color-parchment-100: #f0e7d4;
+  --color-parchment-200: #e2d5b8;
+  --color-parchment-300: #ccbc99;
+  --color-parchment-400: #a99b7d;
+  --color-parchment-500: #877a61;
+  --color-parchment-600: #675d49;
+  --color-parchment-700: #4a4234;
+
+  /* ---- wine: a narrow, muted accent reserved for danger/destructive states ---- */
+  --color-wine-400: #b2544f;
+  --color-wine-500: #92352f;
+  --color-wine-600: #742620;
+
+  /* ---- semantic aliases: build the rest of the UI against these ---- */
+  --color-background: var(--color-ink-950);
+  --color-surface: var(--color-ink-900);
+  --color-surface-elevated: var(--color-ink-800);
+  --color-border: var(--color-ink-700);
+  --color-border-strong: var(--color-ink-600);
+
+  --color-foreground: var(--color-parchment-100);
+  --color-muted-foreground: var(--color-parchment-400);
+
+  --color-accent: var(--color-ember-400);
+  --color-accent-hover: var(--color-ember-300);
+  --color-accent-active: var(--color-ember-600);
+  --color-accent-foreground: var(--color-ink-950);
+
+  --color-danger: var(--color-wine-500);
+  --color-danger-hover: var(--color-wine-400);
+
+  /* ---- radius: soft, slightly generous — not sharp, not pill-happy ---- */
+  --radius-sm: 0.3125rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.75rem;
+
+  /* ---- shadows: warm-tinted, layered ambient + contact shadow instead of
+     flat Material grey; a faint inner rim light stands in for a bevel. ---- */
+  --shadow-xs: 0 1px 0 0 rgb(255 214 170 / 3%) inset, 0 1px 2px 0 rgb(4 3 2 / 45%);
+  --shadow-sm: 0 1px 0 0 rgb(255 214 170 / 4%) inset, 0 2px 6px -1px rgb(4 3 2 / 55%);
+  --shadow-md:
+    0 1px 0 0 rgb(255 214 170 / 4%) inset,
+    0 6px 16px -4px rgb(4 3 2 / 60%),
+    0 2px 6px -2px rgb(4 3 2 / 50%);
+  --shadow-lg:
+    0 1px 0 0 rgb(255 214 170 / 5%) inset,
+    0 16px 36px -12px rgb(2 2 2 / 65%),
+    0 4px 10px -4px rgb(2 2 2 / 55%);
+  --shadow-inset: inset 0 2px 5px 0 rgb(2 2 2 / 55%);
+
+  /* glow: for focus rings and "this is alive" interactive states */
+  --shadow-glow-sm: 0 0 0 1px rgb(236 138 58 / 55%), 0 0 12px -1px rgb(236 138 58 / 55%);
+  --shadow-glow: 0 0 0 1px rgb(236 138 58 / 60%), 0 0 24px -2px rgb(236 138 58 / 60%);
+  --shadow-glow-lg: 0 0 0 1px rgb(236 138 58 / 65%), 0 0 40px -2px rgb(236 138 58 / 65%);
 }
 
+/* Fonts come from next/font as runtime CSS variables on <html>, so they
+   need `inline` to resolve correctly inside generated utilities. */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-display: var(--font-cinzel), Georgia, serif;
+  --font-sans: var(--font-inter), sans-serif;
+  --font-mono: var(--font-geist-mono), monospace;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  background-image:
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgb(101 107 133 / 12%), transparent),
+    radial-gradient(ellipse 60% 50% at 100% 100%, rgb(74 39 23 / 10%), transparent);
+  background-attachment: fixed;
 }
 
 @keyframes pulse-ring {
