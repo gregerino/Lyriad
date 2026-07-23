@@ -94,6 +94,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     setMasterVolume,
     setGroupVolume,
     triggerOneShot,
+    stopOneShot,
     setOneShotVolume,
     removeOneShotSlot,
   } = useAudioEngine();
@@ -153,7 +154,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only the id needs to re-trigger this; other scene field edits shouldn't rewrite the cookie
   }, [scene?.id]);
 
-  async function loadMusicAudio(slotIndex: number, audioFileId: string) {
+  async function loadMusicAudio(slotIndex: number, audioFileId: string, volume: number) {
     const file = audioFilesById.get(audioFileId);
     if (!file) {
       setMusicLoadState((prev) => ({
@@ -168,7 +169,8 @@ export function SceneClient({ sceneId }: SceneClientProps) {
         musicTrackId(slotIndex),
         file.filename,
         file.playbackUrl,
-        musicGroupId(slotIndex)
+        musicGroupId(slotIndex),
+        volume
       );
       setMusicLoadState((prev) => ({ ...prev, [slotIndex]: { status: "loaded" } }));
     } catch {
@@ -179,7 +181,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     }
   }
 
-  async function loadOneshotAudio(slotIndex: number, audioFileId: string) {
+  async function loadOneshotAudio(slotIndex: number, audioFileId: string, volume: number) {
     const file = audioFilesById.get(audioFileId);
     if (!file) {
       setOneshotLoadState((prev) => ({
@@ -190,7 +192,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     }
     setOneshotLoadState((prev) => ({ ...prev, [slotIndex]: { status: "loading" } }));
     try {
-      await loadOneShotFromUrl(oneshotTrackId(slotIndex), file.filename, file.playbackUrl);
+      await loadOneShotFromUrl(oneshotTrackId(slotIndex), file.filename, file.playbackUrl, volume);
       setOneshotLoadState((prev) => ({ ...prev, [slotIndex]: { status: "loaded" } }));
     } catch {
       setOneshotLoadState((prev) => ({
@@ -210,7 +212,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
       if (slot.audioFileId) {
         if (loadedMusicRef.current[slot.slotIndex] !== slot.audioFileId) {
           loadedMusicRef.current[slot.slotIndex] = slot.audioFileId;
-          void loadMusicAudio(slot.slotIndex, slot.audioFileId);
+          void loadMusicAudio(slot.slotIndex, slot.audioFileId, slot.volume);
         }
       } else if (loadedMusicRef.current[slot.slotIndex]) {
         delete loadedMusicRef.current[slot.slotIndex];
@@ -223,7 +225,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
       if (slot.audioFileId) {
         if (loadedOneshotRef.current[slot.slotIndex] !== slot.audioFileId) {
           loadedOneshotRef.current[slot.slotIndex] = slot.audioFileId;
-          void loadOneshotAudio(slot.slotIndex, slot.audioFileId);
+          void loadOneshotAudio(slot.slotIndex, slot.audioFileId, slot.volume);
         }
       } else if (loadedOneshotRef.current[slot.slotIndex]) {
         delete loadedOneshotRef.current[slot.slotIndex];
@@ -413,6 +415,12 @@ export function SceneClient({ sceneId }: SceneClientProps) {
       } else {
         play(trackId);
       }
+    }
+  }
+
+  function fadeOutAllMusic(durationMs: number) {
+    for (const track of Object.values(tracks)) {
+      if (track.isPlaying) fadeOut(track.id, durationMs);
     }
   }
 
@@ -732,6 +740,26 @@ export function SceneClient({ sceneId }: SceneClientProps) {
               {Math.round(masterVolume * 100)}%
             </span>
           </div>
+
+          <div className="flex flex-none items-center gap-1.5">
+            <span className="font-mono text-xs text-muted-foreground">Fada ut allt</span>
+            <button
+              type="button"
+              onClick={() => fadeOutAllMusic(3000)}
+              disabled={!anyMusicPlaying}
+              className="focus-ring rounded-md border border-border-strong px-2 py-1 text-xs text-muted-foreground transition enabled:hover:border-ember-400/60 enabled:hover:text-ember-300 disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              3s
+            </button>
+            <button
+              type="button"
+              onClick={() => fadeOutAllMusic(5000)}
+              disabled={!anyMusicPlaying}
+              className="focus-ring rounded-md border border-border-strong px-2 py-1 text-xs text-muted-foreground transition enabled:hover:border-ember-400/60 enabled:hover:text-ember-300 disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              5s
+            </button>
+          </div>
         </div>
 
         <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -786,8 +814,10 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                       onAssign={(audioFileId) => void assignMusicSlot(slot.slotIndex, audioFileId)}
                       onClear={() => void clearMusicSlot(slot.slotIndex)}
                       onRetry={() => {
-                        if (slot.audioFileId) void loadMusicAudio(slot.slotIndex, slot.audioFileId);
+                        if (slot.audioFileId)
+                          void loadMusicAudio(slot.slotIndex, slot.audioFileId, slot.volume);
                       }}
+                      onPlay={() => play(musicTrackId(slot.slotIndex))}
                       onFadeIn={() => fadeIn(musicTrackId(slot.slotIndex), slot.fade.fadeInMs)}
                       onFadeOut={() => fadeOut(musicTrackId(slot.slotIndex), slot.fade.fadeOutMs)}
                       onStop={() => stop(musicTrackId(slot.slotIndex))}
@@ -891,9 +921,11 @@ export function SceneClient({ sceneId }: SceneClientProps) {
               onAssign={(audioFileId) => void assignOneShotSlot(slot.slotIndex, audioFileId)}
               onClear={() => void clearOneShotSlot(slot.slotIndex)}
               onRetry={() => {
-                if (slot.audioFileId) void loadOneshotAudio(slot.slotIndex, slot.audioFileId);
+                if (slot.audioFileId)
+                  void loadOneshotAudio(slot.slotIndex, slot.audioFileId, slot.volume);
               }}
               onTrigger={() => triggerOneShot(oneshotTrackId(slot.slotIndex))}
+              onStop={() => stopOneShot(oneshotTrackId(slot.slotIndex))}
               onVolumeChange={(volume) => handleOneShotVolume(slot.slotIndex, volume)}
             />
           ))}

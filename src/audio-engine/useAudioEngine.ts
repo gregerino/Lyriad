@@ -18,19 +18,19 @@ export function useAudioEngine() {
   }, [engine]);
 
   const loadTrack = useCallback(
-    async (id: string, file: File, groupId: string) => {
+    async (id: string, file: File, groupId: string, initialVolume?: number) => {
       const data = await file.arrayBuffer();
-      await engine.loadTrack(id, file.name, data, groupId);
+      await engine.loadTrack(id, file.name, data, groupId, initialVolume);
     },
     [engine],
   );
 
   const loadTrackFromUrl = useCallback(
-    async (id: string, name: string, url: string, groupId: string) => {
+    async (id: string, name: string, url: string, groupId: string, initialVolume?: number) => {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Kunde inte hämta ljudfilen (${res.status})`);
       const data = await res.arrayBuffer();
-      await engine.loadTrack(id, name, data, groupId);
+      await engine.loadTrack(id, name, data, groupId, initialVolume);
     },
     [engine],
   );
@@ -74,23 +74,24 @@ export function useAudioEngine() {
   );
 
   const loadOneShot = useCallback(
-    async (id: string, file: File) => {
+    async (id: string, file: File, initialVolume?: number) => {
       const data = await file.arrayBuffer();
-      await engine.loadOneShot(id, file.name, data);
+      await engine.loadOneShot(id, file.name, data, initialVolume);
     },
     [engine],
   );
 
   const loadOneShotFromUrl = useCallback(
-    async (id: string, name: string, url: string) => {
+    async (id: string, name: string, url: string, initialVolume?: number) => {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Kunde inte hämta ljudfilen (${res.status})`);
       const data = await res.arrayBuffer();
-      await engine.loadOneShot(id, name, data);
+      await engine.loadOneShot(id, name, data, initialVolume);
     },
     [engine],
   );
   const triggerOneShot = useCallback((id: string) => engine.triggerOneShot(id), [engine]);
+  const stopOneShot = useCallback((id: string) => engine.stopOneShot(id), [engine]);
   const setOneShotVolume = useCallback(
     (id: string, volume: number) => engine.setOneShotVolume(id, volume),
     [engine],
@@ -119,6 +120,7 @@ export function useAudioEngine() {
     loadOneShot,
     loadOneShotFromUrl,
     triggerOneShot,
+    stopOneShot,
     setOneShotVolume,
     removeOneShotSlot,
   };

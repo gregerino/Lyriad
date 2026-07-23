@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Slider } from "@/components/ui/Slider";
-import { PlusIcon, XIcon } from "@/components/ui/icons";
+import { PlayIcon, PlusIcon, StopIcon, XIcon } from "@/components/ui/icons";
 import type { OneShotState } from "@/audio-engine";
 import type { AudioFileWithMeta, OneShotSlot } from "@/types/domain";
 import { AudioFileSelect } from "./AudioFileSelect";
@@ -20,6 +20,7 @@ type OneShotPadProps = {
   onClear: () => void;
   onRetry: () => void;
   onTrigger: () => void;
+  onStop: () => void;
   onVolumeChange: (volume: number) => void;
 };
 
@@ -40,11 +41,17 @@ export function OneShotPad({
   onClear,
   onRetry,
   onTrigger,
+  onStop,
   onVolumeChange,
 }: OneShotPadProps) {
   const [pulseKey, setPulseKey] = useState(0);
+  const isActive = Boolean(oneShot && oneShot.activeCount > 0);
 
-  function handleTrigger() {
+  function handlePress() {
+    if (isActive) {
+      onStop();
+      return;
+    }
     onTrigger();
     setPulseKey((k) => k + 1);
   }
@@ -91,11 +98,18 @@ export function OneShotPad({
 
       <button
         type="button"
-        onClick={handleTrigger}
+        onClick={handlePress}
         disabled={loadState.status !== "loaded"}
-        aria-label={`Spela ${shortName(file?.filename)}`}
+        aria-pressed={isActive}
+        aria-label={isActive ? `Stoppa ${shortName(file?.filename)}` : `Spela ${shortName(file?.filename)}`}
+        title={isActive ? "Stoppa" : "Spela"}
         className="focus-ring relative isolate flex flex-1 flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-center transition enabled:hover:border-ember-400/40 enabled:active:scale-[0.97] disabled:opacity-40"
       >
+        {isActive ? (
+          <StopIcon className="relative z-10 h-3.5 w-3.5 text-ember-300" />
+        ) : (
+          <PlayIcon className="relative z-10 h-3.5 w-3.5 translate-x-0.5 text-muted-foreground" />
+        )}
         <span className="relative z-10 line-clamp-2 text-[11px] font-medium text-parchment-100 sm:text-xs">
           {shortName(file?.filename)}
         </span>

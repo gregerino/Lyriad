@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Slider } from "@/components/ui/Slider";
-import { LoopIcon, SpeakerOffIcon, SpeakerOnIcon, XIcon } from "@/components/ui/icons";
+import { LoopIcon, PlayIcon, SpeakerOffIcon, SpeakerOnIcon, StopIcon, XIcon } from "@/components/ui/icons";
 import { formatDuration } from "@/lib/audio/limits";
 import type { TrackState } from "@/audio-engine";
 import type { AudioFileWithMeta, FadeSettings, MusicSlot } from "@/types/domain";
@@ -20,6 +20,7 @@ type MusicSlotRowProps = {
   onAssign: (audioFileId: string) => void;
   onClear: () => void;
   onRetry: () => void;
+  onPlay: () => void;
   onFadeIn: () => void;
   onFadeOut: () => void;
   onStop: () => void;
@@ -41,6 +42,7 @@ export function MusicSlotRow({
   onAssign,
   onClear,
   onRetry,
+  onPlay,
   onFadeIn,
   onFadeOut,
   onStop,
@@ -169,6 +171,25 @@ export function MusicSlotRow({
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={() => (track.isPlaying ? onStop() : onPlay())}
+              aria-pressed={track.isPlaying}
+              aria-label={track.isPlaying ? "Stoppa" : "Spela"}
+              title={track.isPlaying ? "Stoppa" : "Spela"}
+              className={`focus-ring flex h-8 w-8 flex-none items-center justify-center rounded-md border transition ${
+                track.isPlaying
+                  ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
+                  : "border-border-strong text-muted-foreground hover:border-ember-400/40 hover:text-ember-300"
+              }`}
+            >
+              {track.isPlaying ? (
+                <StopIcon className="h-4 w-4" />
+              ) : (
+                <PlayIcon className="h-4 w-4 translate-x-0.5" />
+              )}
+            </button>
+
+            <button
+              type="button"
               onClick={() => onLoopChange(!track.loop)}
               aria-pressed={track.loop}
               aria-label={track.loop ? "Loop på" : "Loop av"}
@@ -220,13 +241,6 @@ export function MusicSlotRow({
               className="focus-ring rounded-md border border-border-strong px-2 py-1 transition enabled:hover:border-ember-400/60 enabled:hover:text-ember-300 disabled:opacity-30"
             >
               Ut
-            </button>
-            <button
-              type="button"
-              onClick={onStop}
-              className="focus-ring rounded-md border border-border-strong px-2 py-1 transition hover:border-ember-400/60 hover:text-ember-300"
-            >
-              Stopp
             </button>
           </div>
 

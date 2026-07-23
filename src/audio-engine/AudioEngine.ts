@@ -184,7 +184,13 @@ export class AudioEngine {
     return { tracks, oneShots, masterVolume: this.masterVolume, groups };
   }
 
-  async loadTrack(id: string, name: string, data: ArrayBuffer, groupId: string): Promise<void> {
+  async loadTrack(
+    id: string,
+    name: string,
+    data: ArrayBuffer,
+    groupId: string,
+    initialVolume = 1,
+  ): Promise<void> {
     // Loading into a slot that already holds a track (re-assigning the slot)
     // must stop and disconnect the previous one first, or it keeps playing
     // silently orphaned from the returned state.
@@ -195,6 +201,8 @@ export class AudioEngine {
     const gainNode = ctx.createGain();
     const muteGainNode = ctx.createGain();
     const groupGain = this.ensureGroup(groupId);
+    const volume = Math.min(1, Math.max(0, initialVolume));
+    gainNode.gain.value = volume;
     gainNode.connect(muteGainNode);
     muteGainNode.connect(groupGain);
     this.tracks.set(id, {
@@ -205,7 +213,7 @@ export class AudioEngine {
       muted: false,
       source: null,
       loop: false,
-      volume: 1,
+      volume,
       offset: 0,
       startedAt: 0,
       fadeTimer: null,
@@ -213,7 +221,12 @@ export class AudioEngine {
     this.notify();
   }
 
-  async loadOneShot(id: string, name: string, data: ArrayBuffer): Promise<void> {
+  async loadOneShot(
+    id: string,
+    name: string,
+    data: ArrayBuffer,
+    initialVolume = 1,
+  ): Promise<void> {
     // Same replace-in-place rule as loadTrack: re-assigning a slot stops
     // whatever was previously triggered from it.
     if (this.oneShots.has(id)) this.removeOneShotSlot(id);
@@ -221,12 +234,14 @@ export class AudioEngine {
     const ctx = this.ensureContext();
     const buffer = await ctx.decodeAudioData(data);
     const gainNode = ctx.createGain();
+    const volume = Math.min(1, Math.max(0, initialVolume));
+    gainNode.gain.value = volume;
     gainNode.connect(this.masterGain!);
     this.oneShots.set(id, {
       name,
       buffer,
       gainNode,
-      volume: 1,
+      volume,
       activeSources: new Set(),
     });
     this.notify();
@@ -251,6 +266,18 @@ export class AudioEngine {
       this.notify();
     };
     source.start(0);
+    this.notify();
+  }
+
+  /** Stops every instance of this one-shot slot currently in flight, without discarding the slot itself. */
+  stopOneShot(id: string): void {
+    const slot = this.getOneShotSlot(id);
+    for (const source of slot.activeSources) {
+      source.onended = null;
+      source.stop();
+      source.disconnect();
+    }
+    slot.activeSources.clear();
     this.notify();
   }
 
