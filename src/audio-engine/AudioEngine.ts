@@ -7,6 +7,7 @@ export type TrackState = {
   isPlaying: boolean;
   loop: boolean;
   volume: number;
+  muted: boolean;
   /** True while a scheduled fadeIn/fadeOut ramp is in flight. */
   fading: boolean;
 };
@@ -30,6 +31,13 @@ type Track = {
   name: string;
   buffer: AudioBuffer;
   gainNode: GainNode;
+  /**
+   * In series after gainNode, before the master bus. Mute is a pure on/off
+   * multiplier here so it never has to interact with volume/fade automation
+   * happening on gainNode — muting mid-fade, mid-crossfade, etc. just works.
+   */
+  muteGainNode: GainNode;
+  muted: boolean;
   source: AudioBufferSourceNode | null;
   loop: boolean;
   /** Target volume (0-1) — what the slider shows, independent of the ramp in progress. */
@@ -130,6 +138,7 @@ export class AudioEngine {
         isPlaying: track.source !== null,
         loop: track.loop,
         volume: track.volume,
+        muted: track.muted,
         fading: track.fadeTimer !== null,
       };
     }
@@ -156,11 +165,15 @@ export class AudioEngine {
     const ctx = this.ensureContext();
     const buffer = await ctx.decodeAudioData(data);
     const gainNode = ctx.createGain();
-    gainNode.connect(this.masterGain!);
+    const muteGainNode = ctx.createGain();
+    gainNode.connect(muteGainNode);
+    muteGainNode.connect(this.masterGain!);
     this.tracks.set(id, {
       name,
       buffer,
       gainNode,
+      muteGainNode,
+      muted: false,
       source: null,
       loop: false,
       volume: 1,
@@ -406,6 +419,19 @@ export class AudioEngine {
     this.notify();
   }
 
+  /** Silences (or restores) a track without touching its volume/fade state. */
+  setMuted(id: string, muted: boolean): void {
+    const track = this.getTrack(id);
+    track.muted = muted;
+    const ctx = this.ensureContext();
+    const gain = track.muteGainNode.gain;
+    const now = ctx.currentTime;
+    gain.cancelScheduledValues(now);
+    gain.setValueAtTime(gain.value, now);
+    gain.linearRampToValueAtTime(muted ? 0 : 1, now + 0.02);
+    this.notify();
+  }
+
   /** Scene-wide volume multiplier applied after every track's own gain. */
   setMasterVolume(volume: number, durationMs = 15): void {
     const clamped = Math.min(1, Math.max(0, volume));
@@ -428,6 +454,7 @@ export class AudioEngine {
       track.source.stop();
     }
     track.gainNode.disconnect();
+    track.muteGainNode.disconnect();
     this.tracks.delete(id);
     this.notify();
   }

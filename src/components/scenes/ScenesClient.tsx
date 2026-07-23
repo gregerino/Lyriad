@@ -77,12 +77,7 @@ export function ScenesClient() {
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 bg-zinc-950 px-6 py-12 text-zinc-50">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Scener</h1>
-        <Link href="/library" className="text-sm text-zinc-400 hover:text-zinc-50">
-          Ljudbibliotek →
-        </Link>
-      </div>
+      <h1 className="text-2xl font-semibold tracking-tight">Scener</h1>
 
       <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
         <h2 className="text-sm font-medium text-zinc-200">Ny scen</h2>

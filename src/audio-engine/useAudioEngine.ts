@@ -43,6 +43,7 @@ export function useAudioEngine() {
     [engine],
   );
   const setLoop = useCallback((id: string, loop: boolean) => engine.setLoop(id, loop), [engine]);
+  const setMuted = useCallback((id: string, muted: boolean) => engine.setMuted(id, muted), [engine]);
   const removeTrack = useCallback((id: string) => engine.removeTrack(id), [engine]);
   const fadeIn = useCallback(
     (id: string, durationMs: number, options?: { targetVolume?: number; curve?: FadeCurve }) =>
@@ -103,6 +104,7 @@ export function useAudioEngine() {
     stop,
     setVolume,
     setLoop,
+    setMuted,
     removeTrack,
     fadeIn,
     fadeOut,

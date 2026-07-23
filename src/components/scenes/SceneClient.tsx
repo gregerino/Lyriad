@@ -4,9 +4,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAudioEngine } from "@/audio-engine";
 import type { FadeCurve } from "@/audio-engine";
-import { MusicSlotCard } from "@/components/slots/MusicSlotCard";
-import { OneShotSlotCard } from "@/components/slots/OneShotSlotCard";
+import { MusicSlotRow } from "@/components/slots/MusicSlotRow";
+import { OneShotPad } from "@/components/slots/OneShotPad";
 import type { SlotLoadState } from "@/components/slots/types";
+import { Slider } from "@/components/ui/Slider";
+import { PauseIcon, PlayIcon, SpeakerOnIcon } from "@/components/ui/icons";
+import { LAST_SCENE_COOKIE } from "@/lib/lastScene";
 import type { AudioFileWithMeta, FadeSettings, MusicSlot, OneShotSlot, Scene } from "@/types/domain";
 
 const musicTrackId = (slotIndex: number) => `music-${slotIndex}`;
@@ -57,12 +60,15 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     masterVolume,
     loadTrackFromUrl,
     loadOneShotFromUrl,
+    play,
+    pause,
     fadeIn,
     fadeOut,
     stop,
     crossfade,
     setVolume,
     setLoop,
+    setMuted,
     removeTrack,
     setMasterVolume,
     triggerOneShot,
@@ -111,6 +117,14 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     void fetchAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchAll only depends on sceneId, which is stable for the component's lifetime (page.tsx keys on it)
   }, [sceneId]);
+
+  // Remembers the most recently opened scene so "/" can land back on its mixer view.
+  useEffect(() => {
+    if (!scene) return;
+    const maxAgeSeconds = 60 * 60 * 24 * 365;
+    document.cookie = `${LAST_SCENE_COOKIE}=${scene.id}; path=/; max-age=${maxAgeSeconds}; samesite=lax`;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the id needs to re-trigger this; other scene field edits shouldn't rewrite the cookie
+  }, [scene?.id]);
 
   async function loadMusicAudio(slotIndex: number, audioFileId: string) {
     const file = audioFilesById.get(audioFileId);
@@ -329,6 +343,26 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     void patchMusicSlot(slotIndex, { loop });
   }
 
+  function handleMusicMute(slotIndex: number, muted: boolean) {
+    setMuted(musicTrackId(slotIndex), muted);
+  }
+
+  function toggleMasterPlayback() {
+    const loaded = scene?.musicSlots.filter(
+      (s) => musicLoadState[s.slotIndex]?.status === "loaded"
+    );
+    if (!loaded || loaded.length === 0) return;
+    const anyPlaying = loaded.some((s) => tracks[musicTrackId(s.slotIndex)]?.isPlaying);
+    for (const s of loaded) {
+      const trackId = musicTrackId(s.slotIndex);
+      if (anyPlaying) {
+        if (tracks[trackId]?.isPlaying) pause(trackId);
+      } else {
+        play(trackId);
+      }
+    }
+  }
+
   function handleFadeSettingsChange(slotIndex: number, fade: FadeSettings) {
     setScene((prev) =>
       prev
@@ -359,17 +393,17 @@ export function SceneClient({ sceneId }: SceneClientProps) {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-50">
-        <p className="text-sm text-zinc-400">Laddar scen…</p>
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-sm text-muted-foreground">Laddar scen…</p>
       </div>
     );
   }
 
   if (notFound) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-950 text-zinc-50">
-        <p className="text-sm text-zinc-400">Scenen hittades inte.</p>
-        <Link href="/scenes" className="text-sm text-amber-400 hover:text-amber-300">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3">
+        <p className="text-sm text-muted-foreground">Scenen hittades inte.</p>
+        <Link href="/scenes" className="text-sm text-ember-400 hover:text-ember-300">
           Tillbaka till scener
         </Link>
       </div>
@@ -378,15 +412,15 @@ export function SceneClient({ sceneId }: SceneClientProps) {
 
   if (loadError || !scene) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-950 text-zinc-50">
-        <p className="text-sm text-red-400">{loadError ?? "Kunde inte ladda scenen"}</p>
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3">
+        <p className="text-sm text-wine-400">{loadError ?? "Kunde inte ladda scenen"}</p>
         <button
           type="button"
           onClick={() => {
             setLoading(true);
             void fetchAll();
           }}
-          className="text-sm text-amber-400 hover:text-amber-300"
+          className="text-sm text-ember-400 hover:text-ember-300"
         >
           Försök igen
         </button>
@@ -397,43 +431,80 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   const loadedMusicTrackIds = scene.musicSlots.filter(
     (s) => musicLoadState[s.slotIndex]?.status === "loaded"
   );
+  const anyMusicPlaying = loadedMusicTrackIds.some(
+    (s) => tracks[musicTrackId(s.slotIndex)]?.isPlaying
+  );
+  const filledMusicCount = scene.musicSlots.filter((s) => s.audioFileId).length;
+  const filledOneShotCount = scene.oneShotSlots.filter((s) => s.audioFileId).length;
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-8 bg-zinc-950 px-6 py-12 text-zinc-50">
-      <div className="flex items-center justify-between">
-        <div>
-          <Link href="/scenes" className="text-xs text-zinc-500 hover:text-zinc-300">
-            ← Alla scener
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{scene.name}</h1>
-          {scene.description && <p className="mt-1 text-sm text-zinc-400">{scene.description}</p>}
-        </div>
-        <Link href="/library" className="text-sm text-zinc-400 hover:text-zinc-50">
-          Ljudbibliotek →
+    <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-8 px-4 py-8 sm:px-6 sm:py-12">
+      <div>
+        <Link href="/scenes" className="text-xs text-muted-foreground hover:text-parchment-200">
+          ← Alla scener
         </Link>
-      </div>
-
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-        <label className="flex items-center gap-3 text-sm text-zinc-300">
-          Master volume (påverkar alla platser)
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={masterVolume}
-            onChange={(e) => setMasterVolume(Number(e.target.value))}
-            className="flex-1"
-          />
-          <span className="w-10 text-right tabular-nums">{Math.round(masterVolume * 100)}%</span>
-        </label>
+        <h1 className="mt-1 font-display text-2xl font-medium tracking-wide text-parchment-100 sm:text-3xl">
+          {scene.name}
+        </h1>
+        {scene.description && (
+          <p className="mt-1 text-sm text-muted-foreground">{scene.description}</p>
+        )}
       </div>
 
       <section>
-        <h2 className="text-lg font-medium tracking-tight">Musikplatser</h2>
-        <div className="mt-3 grid gap-4 sm:grid-cols-2">
+        <div className="flex items-center justify-between">
+          <h2 className="font-display text-xl font-medium tracking-wide text-parchment-100">
+            Musik
+          </h2>
+          <span className="font-mono text-xs text-muted-foreground">
+            {filledMusicCount}/{scene.musicSlots.length} platser
+          </span>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-4 rounded-lg border border-ember-500/25 bg-gradient-to-r from-ember-950/50 to-surface p-4 shadow-sm">
+          <button
+            type="button"
+            onClick={toggleMasterPlayback}
+            disabled={loadedMusicTrackIds.length === 0}
+            aria-label={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
+            title={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
+            className="flex h-12 w-12 flex-none items-center justify-center rounded-full bg-gradient-to-b from-ember-400 to-ember-500 text-ink-950 shadow-glow-sm transition hover:shadow-glow disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
+          >
+            {anyMusicPlaying ? (
+              <PauseIcon className="h-5 w-5" />
+            ) : (
+              <PlayIcon className="h-5 w-5 translate-x-0.5" />
+            )}
+          </button>
+
+          <div className="min-w-max flex-none">
+            <p className="text-sm font-medium text-parchment-100">Master</p>
+            <p className="text-xs text-muted-foreground">
+              {loadedMusicTrackIds.length === 0
+                ? "Inga spår laddade"
+                : anyMusicPlaying
+                  ? "Spelar"
+                  : "Pausad"}
+            </p>
+          </div>
+
+          <div className="flex flex-1 items-center gap-3 sm:max-w-xs">
+            <SpeakerOnIcon className="h-4 w-4 flex-none text-muted-foreground" />
+            <Slider
+              value={masterVolume}
+              onChange={setMasterVolume}
+              className="w-full"
+              aria-label="Mastervolym"
+            />
+            <span className="w-10 flex-none text-right font-mono text-xs text-muted-foreground">
+              {Math.round(masterVolume * 100)}%
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-flow-col grid-cols-2 grid-rows-5 gap-3">
           {scene.musicSlots.map((slot) => (
-            <MusicSlotCard
+            <MusicSlotRow
               key={slot.slotIndex}
               slot={slot}
               file={slot.audioFileId ? (audioFilesById.get(slot.audioFileId) ?? null) : null}
@@ -452,19 +523,20 @@ export function SceneClient({ sceneId }: SceneClientProps) {
               onStop={() => stop(musicTrackId(slot.slotIndex))}
               onVolumeChange={(volume) => handleMusicVolume(slot.slotIndex, volume)}
               onLoopChange={(loop) => handleMusicLoop(slot.slotIndex, loop)}
+              onMuteChange={(muted) => handleMusicMute(slot.slotIndex, muted)}
               onFadeSettingsChange={(fade) => handleFadeSettingsChange(slot.slotIndex, fade)}
             />
           ))}
         </div>
 
         {loadedMusicTrackIds.length >= 2 && (
-          <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-            <h3 className="text-sm font-medium">Crossfade</h3>
+          <div className="mt-4 rounded-lg border border-border bg-surface p-4">
+            <h3 className="text-sm font-medium text-parchment-100">Crossfade</h3>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
               <select
                 value={crossfadeFrom}
                 onChange={(e) => setCrossfadeFrom(Number(e.target.value))}
-                className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1"
+                className="rounded-md border border-border-strong bg-background px-2 py-1 text-parchment-100 focus:border-ember-400 focus:outline-none"
               >
                 {loadedMusicTrackIds.map((s) => (
                   <option key={s.slotIndex} value={s.slotIndex}>
@@ -472,11 +544,11 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                   </option>
                 ))}
               </select>
-              <span className="text-zinc-500">→</span>
+              <span className="text-muted-foreground">→</span>
               <select
                 value={crossfadeTo}
                 onChange={(e) => setCrossfadeTo(Number(e.target.value))}
-                className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1"
+                className="rounded-md border border-border-strong bg-background px-2 py-1 text-parchment-100 focus:border-ember-400 focus:outline-none"
               >
                 {loadedMusicTrackIds.map((s) => (
                   <option key={s.slotIndex} value={s.slotIndex}>
@@ -484,7 +556,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                   </option>
                 ))}
               </select>
-              <label className="flex items-center gap-1.5 text-xs text-zinc-400">
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 Tid
                 <input
                   type="number"
@@ -492,14 +564,14 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                   step={100}
                   value={crossfadeMs}
                   onChange={(e) => setCrossfadeMs(Number(e.target.value))}
-                  className="w-20 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-0.5 text-zinc-100"
+                  className="w-20 rounded border border-border-strong bg-background px-1.5 py-0.5 text-parchment-100 focus:border-ember-400 focus:outline-none"
                 />
                 ms
               </label>
               <select
                 value={crossfadeCurve}
                 onChange={(e) => setCrossfadeCurve(e.target.value as FadeCurve)}
-                className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs"
+                className="rounded-md border border-border-strong bg-background px-2 py-1 text-xs text-parchment-100 focus:border-ember-400 focus:outline-none"
               >
                 <option value="linear">Linjär</option>
                 <option value="exponential">Exponentiell</option>
@@ -512,7 +584,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                   })
                 }
                 disabled={crossfadeFrom === crossfadeTo}
-                className="rounded-md bg-zinc-50 px-3 py-1.5 text-sm font-medium text-zinc-950 hover:bg-zinc-200 disabled:opacity-40"
+                className="rounded-md bg-gradient-to-b from-ember-400 to-ember-500 px-3 py-1.5 text-sm font-medium text-ink-950 shadow-sm transition hover:shadow-glow-sm disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Crossfade
               </button>
@@ -522,10 +594,17 @@ export function SceneClient({ sceneId }: SceneClientProps) {
       </section>
 
       <section>
-        <h2 className="text-lg font-medium tracking-tight">One-shots</h2>
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
+        <div className="flex items-center justify-between">
+          <h2 className="font-display text-xl font-medium tracking-wide text-parchment-100">
+            One-shots
+          </h2>
+          <span className="font-mono text-xs text-muted-foreground">
+            {filledOneShotCount}/{scene.oneShotSlots.length} platser
+          </span>
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
           {scene.oneShotSlots.map((slot) => (
-            <OneShotSlotCard
+            <OneShotPad
               key={slot.slotIndex}
               slot={slot}
               file={slot.audioFileId ? (audioFilesById.get(slot.audioFileId) ?? null) : null}
