@@ -25,6 +25,16 @@ export function useAudioEngine() {
     [engine],
   );
 
+  const loadTrackFromUrl = useCallback(
+    async (id: string, name: string, url: string) => {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Kunde inte hämta ljudfilen (${res.status})`);
+      const data = await res.arrayBuffer();
+      await engine.loadTrack(id, name, data);
+    },
+    [engine],
+  );
+
   const play = useCallback((id: string) => engine.play(id), [engine]);
   const pause = useCallback((id: string) => engine.pause(id), [engine]);
   const stop = useCallback((id: string) => engine.stop(id), [engine]);
@@ -65,6 +75,16 @@ export function useAudioEngine() {
     },
     [engine],
   );
+
+  const loadOneShotFromUrl = useCallback(
+    async (id: string, name: string, url: string) => {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Kunde inte hämta ljudfilen (${res.status})`);
+      const data = await res.arrayBuffer();
+      await engine.loadOneShot(id, name, data);
+    },
+    [engine],
+  );
   const triggerOneShot = useCallback((id: string) => engine.triggerOneShot(id), [engine]);
   const setOneShotVolume = useCallback(
     (id: string, volume: number) => engine.setOneShotVolume(id, volume),
@@ -77,6 +97,7 @@ export function useAudioEngine() {
     oneShots: state.oneShots,
     masterVolume: state.masterVolume,
     loadTrack,
+    loadTrackFromUrl,
     play,
     pause,
     stop,
@@ -88,6 +109,7 @@ export function useAudioEngine() {
     crossfade,
     setMasterVolume,
     loadOneShot,
+    loadOneShotFromUrl,
     triggerOneShot,
     setOneShotVolume,
     removeOneShotSlot,
