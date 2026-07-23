@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const parsed = loginSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Password is required" }, { status: 400 });
+    return NextResponse.json({ error: "Lösenord krävs" }, { status: 400 });
   }
 
   let valid: boolean;
@@ -23,13 +23,13 @@ export async function POST(request: Request) {
     valid = verifyEnvPassword(parsed.data.password);
   } catch {
     return NextResponse.json(
-      { error: "Server is not configured for authentication" },
+      { error: "Servern är inte konfigurerad för autentisering" },
       { status: 500 }
     );
   }
 
   if (!valid) {
-    return NextResponse.json({ error: "Invalid password" }, { status: 401 });
+    return NextResponse.json({ error: "Fel lösenord" }, { status: 401 });
   }
 
   const token = await createSessionToken();

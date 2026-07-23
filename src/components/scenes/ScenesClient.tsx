@@ -2,20 +2,32 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
+import { PlusIcon, StarIcon, XIcon } from "@/components/ui/icons";
+import { LAST_SCENE_COOKIE } from "@/lib/lastScene";
 import type { Scene } from "@/types/domain";
 
-type SceneListItem = Pick<Scene, "id" | "name" | "description" | "createdAt" | "updatedAt">;
+type SceneListItem = Pick<
+  Scene,
+  "id" | "name" | "description" | "favorite" | "createdAt" | "updatedAt"
+>;
+
+function readLastSceneId(): string | null {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${LAST_SCENE_COOKIE}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]!) : null;
+}
 
 export function ScenesClient() {
   const router = useRouter();
   const [scenes, setScenes] = useState<SceneListItem[]>([]);
+  const [lastSceneId, setLastSceneId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -36,12 +48,25 @@ export function ScenesClient() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch-on-mount, no external subscription to hang this off
     void loadScenes();
+    setLastSceneId(readLastSceneId());
   }, []);
+
+  function startCreating() {
+    setCreating(true);
+    setCreateError(null);
+  }
+
+  function cancelCreating() {
+    setCreating(false);
+    setName("");
+    setDescription("");
+    setCreateError(null);
+  }
 
   async function createScene() {
     const trimmedName = name.trim();
     if (!trimmedName) return;
-    setCreating(true);
+    setSubmitting(true);
     setCreateError(null);
     try {
       const res = await fetch("/api/scenes", {
@@ -60,11 +85,13 @@ export function ScenesClient() {
       router.push(`/scenes/${scene.id}`);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Kunde inte skapa scenen");
-      setCreating(false);
+      setSubmitting(false);
     }
   }
 
-  async function deleteScene(id: string) {
+  async function deleteScene(e: MouseEvent, id: string) {
+    e.preventDefault();
+    e.stopPropagation();
     setDeletingId(id);
     try {
       const res = await fetch(`/api/scenes/${id}`, { method: "DELETE" });
@@ -75,68 +102,155 @@ export function ScenesClient() {
     }
   }
 
-  return (
-    <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 bg-zinc-950 px-6 py-12 text-zinc-50">
-      <h1 className="text-2xl font-semibold tracking-tight">Scener</h1>
+  async function toggleFavorite(e: MouseEvent, id: string, current: boolean) {
+    e.preventDefault();
+    e.stopPropagation();
+    setScenes((prev) => prev.map((s) => (s.id === id ? { ...s, favorite: !current } : s)));
+    const res = await fetch(`/api/scenes/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ favorite: !current }),
+    });
+    if (!res.ok) {
+      setScenes((prev) => prev.map((s) => (s.id === id ? { ...s, favorite: current } : s)));
+    }
+  }
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-        <h2 className="text-sm font-medium text-zinc-200">Ny scen</h2>
-        <div className="mt-3 flex flex-col gap-2">
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Namn, t.ex. Krogen i Silverbäcken"
-            className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-amber-400 focus:outline-none"
-          />
-          <input
-            type="text"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Beskrivning (valfritt)"
-            className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-amber-400 focus:outline-none"
-          />
-          <button
-            type="button"
-            onClick={() => void createScene()}
-            disabled={!name.trim() || creating}
-            className="self-start rounded-md bg-zinc-50 px-3 py-1.5 text-sm font-medium text-zinc-950 hover:bg-zinc-200 disabled:opacity-40"
-          >
-            {creating ? "Skapar…" : "Skapa scen"}
-          </button>
-          {createError && <p className="text-xs text-red-400">{createError}</p>}
-        </div>
+  return (
+    <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-8 px-4 py-8 sm:px-6 sm:py-12">
+      <div>
+        <p className="font-mono text-xs uppercase tracking-[0.2em] text-ember-400">Lyriad</p>
+        <h1 className="mt-1 font-display text-2xl font-medium tracking-wide text-parchment-100 sm:text-3xl">
+          Scener
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Bläddra bland dina scener, eller skapa en ny.
+        </p>
       </div>
 
-      {loading && <p className="text-sm text-zinc-400">Laddar…</p>}
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      {!loading && !error && scenes.length === 0 && (
-        <p className="text-sm text-zinc-500">Inga scener än — skapa din första ovan.</p>
-      )}
+      {loading && <p className="text-sm text-muted-foreground">Laddar…</p>}
+      {error && <p className="text-sm text-wine-400">{error}</p>}
 
-      <div className="flex flex-col gap-2">
-        {scenes.map((scene) => (
-          <div
-            key={scene.id}
-            className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900 p-4"
-          >
-            <Link href={`/scenes/${scene.id}`} className="flex-1">
-              <p className="text-sm font-medium text-zinc-100">{scene.name}</p>
-              {scene.description && (
-                <p className="mt-0.5 text-xs text-zinc-500">{scene.description}</p>
-              )}
-            </Link>
+      {!loading && !error && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {creating ? (
+            <div className="flex min-h-[9.5rem] flex-col gap-2 rounded-lg border border-ember-400/40 bg-surface p-4 shadow-sm">
+              <input
+                type="text"
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") cancelCreating();
+                }}
+                placeholder="Namn, t.ex. Krogen i Silverbäcken"
+                className="rounded-md border border-border-strong bg-background px-3 py-1.5 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400 focus:outline-none"
+              />
+              <input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void createScene();
+                  if (e.key === "Escape") cancelCreating();
+                }}
+                placeholder="Beskrivning (valfritt)"
+                className="rounded-md border border-border-strong bg-background px-3 py-1.5 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400 focus:outline-none"
+              />
+              {createError && <p className="text-xs text-wine-400">{createError}</p>}
+              <div className="mt-auto flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => void createScene()}
+                  disabled={!name.trim() || submitting}
+                  className="rounded-md bg-gradient-to-b from-ember-400 to-ember-500 px-3 py-1.5 text-sm font-medium text-ink-950 shadow-sm transition hover:shadow-glow-sm disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
+                >
+                  {submitting ? "Skapar…" : "Skapa scen"}
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelCreating}
+                  disabled={submitting}
+                  className="rounded-md px-3 py-1.5 text-sm font-medium text-parchment-400 transition hover:text-ember-300 disabled:opacity-40"
+                >
+                  Avbryt
+                </button>
+              </div>
+            </div>
+          ) : (
             <button
               type="button"
-              onClick={() => void deleteScene(scene.id)}
-              disabled={deletingId === scene.id}
-              className="text-xs text-zinc-500 hover:text-red-400 disabled:opacity-40"
+              onClick={startCreating}
+              className="flex min-h-[9.5rem] flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border-strong text-muted-foreground transition hover:border-ember-400/50 hover:text-ember-300"
             >
-              {deletingId === scene.id ? "Tar bort…" : "Ta bort"}
+              <PlusIcon className="h-5 w-5" />
+              <span className="text-sm font-medium">Ny scen</span>
             </button>
-          </div>
-        ))}
-      </div>
+          )}
+
+          {scenes.map((scene) => {
+            const isLastUsed = scene.id === lastSceneId;
+            return (
+              <div
+                key={scene.id}
+                className="group relative rounded-lg border border-border bg-surface shadow-sm transition hover:border-ember-400/40 hover:shadow-md"
+              >
+                <Link
+                  href={`/scenes/${scene.id}`}
+                  className="flex min-h-[9.5rem] flex-col gap-2 p-4 pr-14"
+                >
+                  <p className="font-display text-lg font-medium tracking-wide text-parchment-100">
+                    {scene.name}
+                  </p>
+                  {scene.description && (
+                    <p className="line-clamp-3 text-sm text-muted-foreground">
+                      {scene.description}
+                    </p>
+                  )}
+                  {isLastUsed && (
+                    <span className="mt-auto inline-flex w-fit items-center gap-1 rounded-full border border-ember-400/40 bg-ember-400/10 px-2 py-0.5 text-[11px] font-medium text-ember-300">
+                      Senast använd
+                    </span>
+                  )}
+                </Link>
+                <div className="absolute right-3 top-4 flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={(e) => void toggleFavorite(e, scene.id, scene.favorite)}
+                    aria-label={
+                      scene.favorite ? `Ta bort ${scene.name} som favorit` : `Gör ${scene.name} till favorit`
+                    }
+                    title={scene.favorite ? "Ta bort som favorit" : "Gör till favorit"}
+                    className={`flex-none transition ${
+                      scene.favorite
+                        ? "text-ember-400 hover:text-ember-300"
+                        : "text-muted-foreground/60 opacity-0 group-hover:opacity-100 hover:text-ember-300"
+                    }`}
+                  >
+                    <StarIcon className="h-4 w-4" filled={scene.favorite} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => void deleteScene(e, scene.id)}
+                    disabled={deletingId === scene.id}
+                    aria-label={`Ta bort ${scene.name}`}
+                    title="Ta bort scen"
+                    className="flex-none text-muted-foreground/80 opacity-0 transition group-hover:opacity-100 hover:text-wine-400 disabled:opacity-40"
+                  >
+                    <XIcon className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          {scenes.length === 0 && !creating && (
+            <p className="col-span-full text-sm text-muted-foreground">
+              Inga scener än — skapa din första ovan.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

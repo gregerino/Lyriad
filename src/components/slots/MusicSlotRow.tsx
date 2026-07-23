@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { Slider } from "@/components/ui/Slider";
 import { LoopIcon, SpeakerOffIcon, SpeakerOnIcon, XIcon } from "@/components/ui/icons";
+import { formatDuration } from "@/lib/audio/limits";
 import type { TrackState } from "@/audio-engine";
 import type { AudioFileWithMeta, FadeSettings, MusicSlot } from "@/types/domain";
 import { AudioFileSelect } from "./AudioFileSelect";
@@ -25,6 +27,7 @@ type MusicSlotRowProps = {
   onLoopChange: (loop: boolean) => void;
   onMuteChange: (muted: boolean) => void;
   onFadeSettingsChange: (fade: FadeSettings) => void;
+  onRename: (name: string | null) => void;
 };
 
 export function MusicSlotRow({
@@ -45,8 +48,25 @@ export function MusicSlotRow({
   onLoopChange,
   onMuteChange,
   onFadeSettingsChange,
+  onRename,
 }: MusicSlotRowProps) {
   const ready = Boolean(slot.audioFileId) && loadState.status === "loaded" && Boolean(track);
+  const resolvedName = slot.name ?? file?.filename ?? "Okänd fil";
+  const [nameDraft, setNameDraft] = useState(resolvedName);
+  // Resets the draft whenever the resolved name changes externally (reassignment,
+  // refetch) — the sanctioned "adjust state during render" pattern, not an effect,
+  // so typing in progress is never clobbered by an unrelated re-render.
+  const [syncedName, setSyncedName] = useState(resolvedName);
+  if (resolvedName !== syncedName) {
+    setSyncedName(resolvedName);
+    setNameDraft(resolvedName);
+  }
+
+  function commitName() {
+    const trimmed = nameDraft.trim();
+    const next = trimmed === "" ? null : trimmed;
+    if (next !== slot.name) onRename(next);
+  }
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 shadow-xs transition hover:border-border-strong">
@@ -69,12 +89,32 @@ export function MusicSlotRow({
       </div>
 
       {slot.audioFileId ? (
-        <p
-          className="line-clamp-2 min-h-[2.25rem] text-sm font-medium text-parchment-100"
-          title={file?.filename}
-        >
-          {file?.filename ?? "Okänd fil"}
-        </p>
+        <div className="flex items-start justify-between gap-2">
+          <input
+            type="text"
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onBlur={commitName}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                commitName();
+                (e.target as HTMLInputElement).blur();
+              }
+              if (e.key === "Escape") {
+                setNameDraft(resolvedName);
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            title={file?.filename}
+            aria-label="Namn på musikplats"
+            className="min-w-0 flex-1 truncate rounded bg-transparent text-sm font-medium text-parchment-100 focus:bg-background focus:outline-none focus:ring-1 focus:ring-ember-400"
+          />
+          {track && (
+            <span className="flex-none font-mono text-[11px] text-muted-foreground">
+              {formatDuration(track.duration)}
+            </span>
+          )}
+        </div>
       ) : (
         <AudioFileSelect
           files={libraryFiles}
@@ -99,6 +139,21 @@ export function MusicSlotRow({
           >
             Försök igen
           </button>
+        </div>
+      )}
+
+      {slot.audioFileId && (
+        <div className="flex items-center gap-2">
+          <SpeakerOnIcon className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+          <Slider
+            value={track ? track.volume : slot.volume}
+            onChange={onVolumeChange}
+            className="w-full"
+            aria-label="Volym"
+          />
+          <span className="w-9 flex-none text-right font-mono text-xs text-muted-foreground">
+            {Math.round((track ? track.volume : slot.volume) * 100)}%
+          </span>
         </div>
       )}
 
@@ -140,13 +195,6 @@ export function MusicSlotRow({
             </button>
 
             {track.fading && <span className="text-xs text-ember-400">fadar…</span>}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Slider value={track.volume} onChange={onVolumeChange} className="w-full" aria-label="Volym" />
-            <span className="w-9 flex-none text-right font-mono text-xs text-muted-foreground">
-              {Math.round(track.volume * 100)}%
-            </span>
           </div>
 
           <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">

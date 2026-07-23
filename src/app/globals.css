@@ -124,6 +124,22 @@ body {
   }
 }
 
+/* A soft fade used when navigating between pages — polished, not distracting. */
+@keyframes page-fade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-page-fade {
+  animation: page-fade 260ms ease-out;
+}
+
 /* Shared range-input styling — an ember-filled track with a glowing thumb,
    used anywhere a mixer volume slider appears. */
 .lyriad-slider {

@@ -15,6 +15,20 @@
       "when": 1784724031132,
       "tag": "0001_classy_revanche",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784805732161,
+      "tag": "0002_spotty_meggan",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784807131892,
+      "tag": "0003_faithful_vivisector",
+      "breakpoints": true
     }
   ]
 }

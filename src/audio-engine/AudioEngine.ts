@@ -21,10 +21,15 @@ export type OneShotState = {
   activeCount: number;
 };
 
+export type GroupState = {
+  volume: number;
+};
+
 export type EngineState = {
   tracks: Record<string, TrackState>;
   oneShots: Record<string, OneShotState>;
   masterVolume: number;
+  groups: Record<string, GroupState>;
 };
 
 type Track = {
@@ -83,6 +88,7 @@ export class AudioEngine {
   private masterVolume = 1;
   private tracks = new Map<string, Track>();
   private oneShots = new Map<string, OneShotSlot>();
+  private groups = new Map<string, { gainNode: GainNode; volume: number }>();
   private listeners = new Set<Listener>();
 
   private ensureContext(): AudioContext {
@@ -108,6 +114,23 @@ export class AudioEngine {
     const slot = this.oneShots.get(id);
     if (!slot) throw new Error(`Unknown one-shot slot: ${id}`);
     return slot;
+  }
+
+  /**
+   * Lazily creates a bus GainNode for a track group (e.g. one mixer column),
+   * sitting between member tracks and the master bus so the group's fader
+   * doesn't disturb each track's own volume.
+   */
+  private ensureGroup(groupId: string): GainNode {
+    const ctx = this.ensureContext();
+    let group = this.groups.get(groupId);
+    if (!group) {
+      const gainNode = ctx.createGain();
+      gainNode.connect(this.masterGain!);
+      group = { gainNode, volume: 1 };
+      this.groups.set(groupId, group);
+    }
+    return group.gainNode;
   }
 
   private clearFadeTimer(track: Track): void {
@@ -153,10 +176,15 @@ export class AudioEngine {
       };
     }
 
-    return { tracks, oneShots, masterVolume: this.masterVolume };
+    const groups: Record<string, GroupState> = {};
+    for (const [id, group] of this.groups) {
+      groups[id] = { volume: group.volume };
+    }
+
+    return { tracks, oneShots, masterVolume: this.masterVolume, groups };
   }
 
-  async loadTrack(id: string, name: string, data: ArrayBuffer): Promise<void> {
+  async loadTrack(id: string, name: string, data: ArrayBuffer, groupId: string): Promise<void> {
     // Loading into a slot that already holds a track (re-assigning the slot)
     // must stop and disconnect the previous one first, or it keeps playing
     // silently orphaned from the returned state.
@@ -166,8 +194,9 @@ export class AudioEngine {
     const buffer = await ctx.decodeAudioData(data);
     const gainNode = ctx.createGain();
     const muteGainNode = ctx.createGain();
+    const groupGain = this.ensureGroup(groupId);
     gainNode.connect(muteGainNode);
-    muteGainNode.connect(this.masterGain!);
+    muteGainNode.connect(groupGain);
     this.tracks.set(id, {
       name,
       buffer,
@@ -445,6 +474,18 @@ export class AudioEngine {
     this.notify();
   }
 
+  /** Bus volume for a group of tracks (e.g. one mixer column) — multiplies on top of each track's own gain. */
+  setGroupVolume(groupId: string, volume: number): void {
+    const clamped = Math.min(1, Math.max(0, volume));
+    const gainNode = this.ensureGroup(groupId);
+    const group = this.groups.get(groupId)!;
+    group.volume = clamped;
+    const ctx = this.ensureContext();
+    gainNode.gain.cancelScheduledValues(ctx.currentTime);
+    gainNode.gain.setValueAtTime(clamped, ctx.currentTime);
+    this.notify();
+  }
+
   removeTrack(id: string): void {
     const track = this.tracks.get(id);
     if (!track) return;
@@ -462,6 +503,8 @@ export class AudioEngine {
   dispose(): void {
     for (const id of [...this.tracks.keys()]) this.removeTrack(id);
     for (const id of [...this.oneShots.keys()]) this.removeOneShotSlot(id);
+    for (const group of this.groups.values()) group.gainNode.disconnect();
+    this.groups.clear();
     this.listeners.clear();
     void this.audioContext?.close();
     this.audioContext = null;

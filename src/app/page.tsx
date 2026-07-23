@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { listScenes, sceneExists } from "@/lib/db/queries";
+import { MixerHome } from "@/components/scenes/MixerHome";
+import { sceneExists } from "@/lib/db/queries";
 import { LAST_SCENE_COOKIE } from "@/lib/lastScene";
 
 export default async function Home() {
@@ -11,11 +12,5 @@ export default async function Home() {
     redirect(`/scenes/${lastSceneId}`);
   }
 
-  const scenes = await listScenes();
-  const mostRecent = scenes.at(-1);
-  if (mostRecent) {
-    redirect(`/scenes/${mostRecent.id}`);
-  }
-
-  redirect("/scenes");
+  return <MixerHome />;
 }

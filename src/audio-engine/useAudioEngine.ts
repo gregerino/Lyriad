@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AudioEngine, type EngineState, type FadeCurve } from "./AudioEngine";
 
-const EMPTY_STATE: EngineState = { tracks: {}, oneShots: {}, masterVolume: 1 };
+const EMPTY_STATE: EngineState = { tracks: {}, oneShots: {}, masterVolume: 1, groups: {} };
 
 export function useAudioEngine() {
   const [engine] = useState(() => new AudioEngine());
@@ -18,19 +18,19 @@ export function useAudioEngine() {
   }, [engine]);
 
   const loadTrack = useCallback(
-    async (id: string, file: File) => {
+    async (id: string, file: File, groupId: string) => {
       const data = await file.arrayBuffer();
-      await engine.loadTrack(id, file.name, data);
+      await engine.loadTrack(id, file.name, data, groupId);
     },
     [engine],
   );
 
   const loadTrackFromUrl = useCallback(
-    async (id: string, name: string, url: string) => {
+    async (id: string, name: string, url: string, groupId: string) => {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Kunde inte hämta ljudfilen (${res.status})`);
       const data = await res.arrayBuffer();
-      await engine.loadTrack(id, name, data);
+      await engine.loadTrack(id, name, data, groupId);
     },
     [engine],
   );
@@ -68,6 +68,10 @@ export function useAudioEngine() {
     (volume: number) => engine.setMasterVolume(volume),
     [engine],
   );
+  const setGroupVolume = useCallback(
+    (groupId: string, volume: number) => engine.setGroupVolume(groupId, volume),
+    [engine],
+  );
 
   const loadOneShot = useCallback(
     async (id: string, file: File) => {
@@ -97,6 +101,7 @@ export function useAudioEngine() {
     tracks: state.tracks,
     oneShots: state.oneShots,
     masterVolume: state.masterVolume,
+    groups: state.groups,
     loadTrack,
     loadTrackFromUrl,
     play,
@@ -110,6 +115,7 @@ export function useAudioEngine() {
     fadeOut,
     crossfade,
     setMasterVolume,
+    setGroupVolume,
     loadOneShot,
     loadOneShotFromUrl,
     triggerOneShot,

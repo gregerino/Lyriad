@@ -135,6 +135,23 @@ export function ScenesIcon({ className }: IconProps) {
   );
 }
 
+export function StarIcon({ className, filled }: IconProps & { filled?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 3.5l2.47 5.18 5.53.72-4.06 3.98 1.03 5.62L12 16.2l-4.97 2.8 1.03-5.62-4.06-3.98 5.53-.72L12 3.5z" />
+    </svg>
+  );
+}
+
 export function LibraryIcon({ className }: IconProps) {
   return (
     <svg

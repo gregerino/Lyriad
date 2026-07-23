@@ -57,7 +57,7 @@ export function OneShotPad({
           disabled={assigning}
           onSelect={onAssign}
           overlay={
-            <div className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-border-strong/70 text-muted-foreground transition group-hover:border-ember-400/50">
+            <div className="flex aspect-[3/2] w-full flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-border-strong/70 text-muted-foreground transition group-hover:border-ember-400/50">
               <PlusIcon className="h-4 w-4" />
               <span className="text-[10px] font-medium">Tilldela</span>
             </div>
@@ -72,7 +72,7 @@ export function OneShotPad({
   }
 
   return (
-    <div className="relative flex aspect-square flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-xs transition hover:border-border-strong">
+    <div className="relative flex aspect-[3/2] flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-xs transition hover:border-border-strong">
       <button
         type="button"
         onClick={onClear}
@@ -89,7 +89,7 @@ export function OneShotPad({
         onClick={handleTrigger}
         disabled={loadState.status !== "loaded"}
         aria-label={`Spela ${shortName(file?.filename)}`}
-        className="relative isolate flex flex-1 flex-col items-center justify-center gap-1 overflow-hidden px-2 py-3 text-center transition enabled:hover:border-ember-400/40 enabled:active:scale-[0.97] disabled:opacity-40"
+        className="relative isolate flex flex-1 flex-col items-center justify-center gap-1 overflow-hidden px-2 py-2 text-center transition enabled:hover:border-ember-400/40 enabled:active:scale-[0.97] disabled:opacity-40"
       >
         <span className="relative z-10 line-clamp-2 text-[11px] font-medium text-parchment-100 sm:text-xs">
           {shortName(file?.filename)}

@@ -9,7 +9,6 @@ import {
   MAX_AUDIO_UPLOAD_BYTES,
 } from "@/lib/audio/limits";
 import type { AudioCategory, AudioFile, Scene } from "@/types/domain";
-import { TagEditor } from "./TagEditor";
 import { uploadWithProgress } from "./uploadWithProgress";
 
 type FreeSlot = { kind: "music" | "oneshot"; slotIndex: number };
@@ -40,7 +39,6 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
   const [status, setStatus] = useState<Status>({ step: "idle" });
   const [dragActive, setDragActive] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<AudioCategory | null>(null);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const categoryLocked = category !== undefined;
   const effectiveCategory = categoryLocked ? category : selectedCategory;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -101,7 +99,6 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
           r2Key,
           mimeType,
           category: effectiveCategory ?? null,
-          tags: selectedTags,
         }),
       });
       if (!registerRes.ok) {
@@ -154,37 +151,29 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
 
   function reset() {
     setStatus({ step: "idle" });
-    setSelectedTags([]);
     if (!categoryLocked) setSelectedCategory(null);
     if (inputRef.current) inputRef.current.value = "";
   }
 
   return (
-    <div className="flex w-full flex-col gap-3 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-      {(status.step === "idle" || status.step === "error") && (
-        <div className="flex flex-col gap-3">
-          {!categoryLocked && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-zinc-400">Typ:</span>
-              {AUDIO_CATEGORIES.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setSelectedCategory(selectedCategory === c ? null : c)}
-                  className={`rounded-md border px-2.5 py-1 ${
-                    selectedCategory === c
-                      ? "border-amber-400 text-amber-400"
-                      : "border-zinc-700 text-zinc-300 hover:border-zinc-500"
-                  }`}
-                >
-                  {AUDIO_CATEGORY_LABELS[c]}
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5">
-            <TagEditor tags={selectedTags} onChange={setSelectedTags} placeholder="Taggar…" />
-          </div>
+    <div className="flex w-full flex-col gap-3 rounded-lg border border-border bg-surface p-4 shadow-xs">
+      {(status.step === "idle" || status.step === "error") && !categoryLocked && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-muted-foreground">Typ:</span>
+          {AUDIO_CATEGORIES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setSelectedCategory(selectedCategory === c ? null : c)}
+              className={`rounded-md border px-2.5 py-1 transition ${
+                selectedCategory === c
+                  ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
+                  : "border-border-strong text-parchment-300 hover:border-ember-400/40"
+              }`}
+            >
+              {AUDIO_CATEGORY_LABELS[c]}
+            </button>
+          ))}
         </div>
       )}
       {(status.step === "idle" || status.step === "error") && (
@@ -202,7 +191,9 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
           }}
           onClick={() => inputRef.current?.click()}
           className={`flex cursor-pointer flex-col items-center gap-2 rounded-md border border-dashed p-6 text-center transition-colors ${
-            dragActive ? "border-amber-400 bg-zinc-800" : "border-zinc-700 hover:border-zinc-500"
+            dragActive
+              ? "border-ember-400 bg-surface-elevated"
+              : "border-border-strong hover:border-ember-400/40"
           }`}
         >
           <input
@@ -215,38 +206,38 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
               if (file) void handleFile(file);
             }}
           />
-          <p className="text-sm text-zinc-300">Släpp en ljudfil här, eller klicka för att välja</p>
-          <p className="text-xs text-zinc-500">
+          <p className="text-sm text-parchment-300">Släpp en ljudfil här, eller klicka för att välja</p>
+          <p className="text-xs text-muted-foreground">
             mp3, wav eller ogg — max {formatBytes(MAX_AUDIO_UPLOAD_BYTES)}
           </p>
         </div>
       )}
 
       {status.step === "error" && (
-        <p className="text-xs text-red-400">{status.message}</p>
+        <p className="text-xs text-wine-400">{status.message}</p>
       )}
 
       {status.step === "uploading" && (
         <div className="flex flex-col gap-2">
-          <p className="truncate text-sm text-zinc-300">Laddar upp {status.filename}…</p>
-          <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-800">
+          <p className="truncate text-sm text-parchment-300">Laddar upp {status.filename}…</p>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-ink-700">
             <div
-              className="h-full rounded-full bg-amber-400 transition-[width]"
+              className="h-full rounded-full bg-gradient-to-r from-ember-500 to-ember-400 transition-[width]"
               style={{ width: `${Math.round(status.progress * 100)}%` }}
             />
           </div>
-          <p className="text-xs text-zinc-500">{Math.round(status.progress * 100)}%</p>
+          <p className="text-xs text-muted-foreground">{Math.round(status.progress * 100)}%</p>
         </div>
       )}
 
       {status.step === "registering" && (
-        <p className="text-sm text-zinc-300">Sparar filmetadata…</p>
+        <p className="text-sm text-parchment-300">Sparar filmetadata…</p>
       )}
 
       {status.step === "assign" && (
         <div className="flex flex-col gap-3">
-          <p className="text-sm text-zinc-300">
-            <span className="font-medium text-zinc-100">{status.audioFile.filename}</span>{" "}
+          <p className="text-sm text-parchment-300">
+            <span className="font-medium text-parchment-100">{status.audioFile.filename}</span>{" "}
             laddades upp. Tilldela en ledig plats i scenen?
           </p>
           <div className="flex flex-wrap gap-2">
@@ -255,7 +246,7 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
                 key={`${slot.kind}-${slot.slotIndex}`}
                 type="button"
                 onClick={() => void handleAssign(status.audioFile, slot)}
-                className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-100 hover:border-amber-400"
+                className="rounded-md border border-border-strong bg-background px-3 py-1.5 text-xs text-parchment-100 transition hover:border-ember-400/60 hover:text-ember-300"
               >
                 {slotLabel(slot)}
               </button>
@@ -264,7 +255,7 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
           <button
             type="button"
             onClick={() => setStatus({ step: "done", audioFile: status.audioFile })}
-            className="self-start text-xs text-zinc-500 hover:text-zinc-300"
+            className="self-start text-xs text-muted-foreground hover:text-parchment-100"
           >
             Hoppa över
           </button>
@@ -272,13 +263,13 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
       )}
 
       {status.step === "assigning" && (
-        <p className="text-sm text-zinc-300">Tilldelar {slotLabel(status.slot)}…</p>
+        <p className="text-sm text-parchment-300">Tilldelar {slotLabel(status.slot)}…</p>
       )}
 
       {status.step === "done" && (
         <div className="flex flex-col gap-2">
-          <p className="text-sm text-zinc-300">
-            <span className="font-medium text-zinc-100">{status.audioFile.filename}</span>{" "}
+          <p className="text-sm text-parchment-300">
+            <span className="font-medium text-parchment-100">{status.audioFile.filename}</span>{" "}
             {status.assignedSlot
               ? `tilldelades ${slotLabel(status.assignedSlot)}.`
               : "laddades upp."}
@@ -286,7 +277,7 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
           <button
             type="button"
             onClick={reset}
-            className="self-start text-xs text-amber-400 hover:text-amber-300"
+            className="self-start text-xs text-ember-400 hover:text-ember-300"
           >
             Ladda upp en till
           </button>

@@ -21,7 +21,6 @@ export const audioFiles = pgTable(
     r2Key: text("r2_key").notNull().unique(),
     mimeType: text("mime_type").notNull(),
     category: text("category"),
-    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -59,6 +58,7 @@ export const scenes = pgTable("scenes", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   description: text("description"),
+  favorite: boolean("favorite").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -77,6 +77,7 @@ export const sceneMusicSlots = pgTable(
     audioFileId: uuid("audio_file_id").references(() => audioFiles.id, {
       onDelete: "set null",
     }),
+    name: text("name"),
     volume: real("volume").notNull().default(0.8),
     loop: boolean("loop").notNull().default(true),
     fadeInMs: integer("fade_in_ms").notNull().default(0),

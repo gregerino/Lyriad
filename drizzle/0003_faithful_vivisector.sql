@@ -1,0 +1,1 @@
+ALTER TABLE "scene_music_slots" ADD COLUMN "name" text;

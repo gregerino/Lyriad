@@ -7,6 +7,7 @@ export type MusicSlot = {
   sceneId: string;
   slotIndex: number; // 1-10
   audioFileId: string | null;
+  name: string | null;
   volume: number; // 0-1
   loop: boolean;
   fade: FadeSettings;
@@ -30,7 +31,6 @@ export type AudioFile = {
   r2Key: string;
   mimeType: string;
   category: AudioCategory | null;
-  tags: string[];
   createdAt: string;
 };
 
@@ -48,6 +48,7 @@ export type Scene = {
   id: string;
   name: string;
   description: string | null;
+  favorite: boolean;
   musicSlots: MusicSlot[];
   oneShotSlots: OneShotSlot[];
   createdAt: string;

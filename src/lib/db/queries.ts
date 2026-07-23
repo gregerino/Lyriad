@@ -26,6 +26,7 @@ function toMusicSlot(row: typeof sceneMusicSlots.$inferSelect): MusicSlot {
     sceneId: row.sceneId,
     slotIndex: row.slotIndex,
     audioFileId: row.audioFileId,
+    name: row.name,
     volume: row.volume,
     loop: row.loop,
     fade: { fadeInMs: row.fadeInMs, fadeOutMs: row.fadeOutMs },
@@ -51,7 +52,6 @@ export function toAudioFile(row: typeof audioFiles.$inferSelect): AudioFile {
     r2Key: row.r2Key,
     mimeType: row.mimeType,
     category: row.category as AudioCategory | null,
-    tags: row.tags,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -92,6 +92,7 @@ function toScene(
     id: row.id,
     name: row.name,
     description: row.description,
+    favorite: row.favorite,
     musicSlots: slots.musicSlots,
     oneShotSlots: slots.oneShotSlots,
     createdAt: row.createdAt.toISOString(),
@@ -100,13 +101,14 @@ function toScene(
 }
 
 export async function listScenes(): Promise<
-  Pick<Scene, "id" | "name" | "description" | "createdAt" | "updatedAt">[]
+  Pick<Scene, "id" | "name" | "description" | "favorite" | "createdAt" | "updatedAt">[]
 > {
   const rows = await db
     .select({
       id: scenes.id,
       name: scenes.name,
       description: scenes.description,
+      favorite: scenes.favorite,
       createdAt: scenes.createdAt,
       updatedAt: scenes.updatedAt,
     })
@@ -165,7 +167,7 @@ export async function sceneExists(id: string): Promise<boolean> {
 
 export async function updateScene(
   id: string,
-  patch: { name?: string; description?: string | null }
+  patch: { name?: string; description?: string | null; favorite?: boolean }
 ): Promise<Scene | null> {
   const [row] = await db
     .update(scenes)
@@ -200,6 +202,7 @@ export async function updateMusicSlot(
   slotIndex: number,
   patch: Partial<{
     audioFileId: string | null;
+    name: string | null;
     volume: number;
     loop: boolean;
     fadeInMs: number;
@@ -264,7 +267,6 @@ export async function createAudioFile(input: {
   r2Key: string;
   mimeType: string;
   category: string | null;
-  tags: string[];
 }): Promise<AudioFile> {
   const [row] = await db.insert(audioFiles).values(input).returning();
   return toAudioFile(row);
@@ -277,7 +279,7 @@ export async function deleteAudioFile(id: string): Promise<AudioFile | null> {
 
 export async function updateAudioFile(
   id: string,
-  patch: Partial<{ category: AudioCategory | null; tags: string[] }>
+  patch: Partial<{ category: AudioCategory | null }>
 ): Promise<AudioFile | null> {
   const [row] = await db
     .update(audioFiles)
@@ -285,32 +287,6 @@ export async function updateAudioFile(
     .where(eq(audioFiles.id, id))
     .returning();
   return row ? toAudioFile(row) : null;
-}
-
-export async function bulkUpdateAudioFileTags(
-  ids: string[],
-  changes: { add?: string[]; remove?: string[] }
-): Promise<AudioFile[]> {
-  const rows = await db.select().from(audioFiles).where(inArray(audioFiles.id, ids));
-  if (rows.length === 0) return [];
-
-  const add = changes.add ?? [];
-  const remove = new Set(changes.remove ?? []);
-
-  const updates = rows.map((row) => {
-    const nextTags = new Set(row.tags.filter((tag) => !remove.has(tag)));
-    for (const tag of add) nextTags.add(tag);
-    return db
-      .update(audioFiles)
-      .set({ tags: Array.from(nextTags) })
-      .where(eq(audioFiles.id, row.id))
-      .returning();
-  });
-
-  const results = await db.batch(
-    updates as [(typeof updates)[number], ...(typeof updates)[number][]]
-  );
-  return results.map(([row]) => toAudioFile(row));
 }
 
 export async function listAudioFileCollectionIds(): Promise<Map<string, string[]>> {

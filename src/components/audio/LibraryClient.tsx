@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { AUDIO_CATEGORIES, AUDIO_CATEGORY_LABELS, formatBytes } from "@/lib/audio/limits";
 import type { AudioCategory, AudioFileWithMeta, Collection } from "@/types/domain";
 import { AudioUploader } from "./AudioUploader";
-import { TagEditor } from "./TagEditor";
 
 type CategoryFilter = "all" | AudioCategory;
 
@@ -20,8 +19,6 @@ export function LibraryClient() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const [newCollectionName, setNewCollectionName] = useState("");
-  const [bulkAddTags, setBulkAddTags] = useState<string[]>([]);
-  const [bulkRemoveTags, setBulkRemoveTags] = useState<string[]>([]);
   const [bulkTargetCollection, setBulkTargetCollection] = useState<string>("");
 
   async function loadAll() {
@@ -55,11 +52,7 @@ export function LibraryClient() {
       if (collectionFilter !== "all" && !file.collectionIds.includes(collectionFilter)) {
         return false;
       }
-      if (q) {
-        const matchesFilename = file.filename.toLowerCase().includes(q);
-        const matchesTag = file.tags.some((tag) => tag.toLowerCase().includes(q));
-        if (!matchesFilename && !matchesTag) return false;
-      }
+      if (q && !file.filename.toLowerCase().includes(q)) return false;
       return true;
     });
   }, [audioFiles, search, categoryFilter, collectionFilter]);
@@ -85,7 +78,7 @@ export function LibraryClient() {
     });
   }
 
-  async function updateFile(id: string, patch: { category?: AudioCategory | null; tags?: string[] }) {
+  async function updateFile(id: string, patch: { category?: AudioCategory | null }) {
     const res = await fetch(`/api/audio-files/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -96,23 +89,6 @@ export function LibraryClient() {
     setAudioFiles((prev) =>
       prev.map((f) => (f.id === id ? { ...f, ...audioFile } : f))
     );
-  }
-
-  async function applyBulkTags() {
-    if (selectedIds.size === 0 || (bulkAddTags.length === 0 && bulkRemoveTags.length === 0)) return;
-    const res = await fetch("/api/audio-files", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ids: Array.from(selectedIds),
-        add: bulkAddTags,
-        remove: bulkRemoveTags,
-      }),
-    });
-    if (!res.ok) return;
-    setBulkAddTags([]);
-    setBulkRemoveTags([]);
-    await loadAll();
   }
 
   async function addSelectionToCollection() {
@@ -226,7 +202,7 @@ export function LibraryClient() {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Sök på filnamn eller tagg…"
+          placeholder="Sök på filnamn…"
           className="min-w-[16rem] flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-amber-400 focus:outline-none"
         />
         <div className="flex items-center gap-1 text-xs">
@@ -270,30 +246,8 @@ export function LibraryClient() {
               Avmarkera alla
             </button>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <p className="mb-1 text-xs text-zinc-400">Lägg till taggar</p>
-              <div className="rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5">
-                <TagEditor tags={bulkAddTags} onChange={setBulkAddTags} placeholder="Ny tagg…" />
-              </div>
-            </div>
-            <div>
-              <p className="mb-1 text-xs text-zinc-400">Ta bort taggar</p>
-              <div className="rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5">
-                <TagEditor tags={bulkRemoveTags} onChange={setBulkRemoveTags} placeholder="Tagg att ta bort…" />
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => void applyBulkTags()}
-            disabled={bulkAddTags.length === 0 && bulkRemoveTags.length === 0}
-            className="self-start rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-200 hover:border-amber-400 disabled:opacity-40"
-          >
-            Uppdatera taggar på markerade
-          </button>
 
-          <div className="flex items-center gap-2 border-t border-zinc-800 pt-3">
+          <div className="flex items-center gap-2">
             <select
               value={bulkTargetCollection}
               onChange={(e) => setBulkTargetCollection(e.target.value)}
@@ -376,12 +330,6 @@ export function LibraryClient() {
                       </button>
                     </span>
                   ))}
-                </div>
-                <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5">
-                  <TagEditor
-                    tags={file.tags}
-                    onChange={(tags) => void updateFile(file.id, { tags })}
-                  />
                 </div>
               </div>
             </div>

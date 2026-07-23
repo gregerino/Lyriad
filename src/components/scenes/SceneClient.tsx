@@ -4,16 +4,20 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAudioEngine } from "@/audio-engine";
 import type { FadeCurve } from "@/audio-engine";
+import { AudioUploader } from "@/components/audio/AudioUploader";
+import { FavoriteScenesBar } from "@/components/scenes/FavoriteScenesBar";
 import { MusicSlotRow } from "@/components/slots/MusicSlotRow";
 import { OneShotPad } from "@/components/slots/OneShotPad";
 import type { SlotLoadState } from "@/components/slots/types";
 import { Slider } from "@/components/ui/Slider";
-import { PauseIcon, PlayIcon, SpeakerOnIcon } from "@/components/ui/icons";
+import { LoopIcon, PauseIcon, PlayIcon, SpeakerOnIcon } from "@/components/ui/icons";
 import { LAST_SCENE_COOKIE } from "@/lib/lastScene";
 import type { AudioFileWithMeta, FadeSettings, MusicSlot, OneShotSlot, Scene } from "@/types/domain";
 
 const musicTrackId = (slotIndex: number) => `music-${slotIndex}`;
 const oneshotTrackId = (slotIndex: number) => `oneshot-${slotIndex}`;
+const MUSIC_COLUMN_SIZE = 5;
+const musicGroupId = (slotIndex: number) => (slotIndex <= MUSIC_COLUMN_SIZE ? "left" : "right");
 
 function replaceMusicSlot(scene: Scene, slot: MusicSlot): Scene {
   return {
@@ -45,6 +49,8 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   const [musicSlotErrors, setMusicSlotErrors] = useState<Record<number, string | null>>({});
   const [oneshotSlotErrors, setOneshotSlotErrors] = useState<Record<number, string | null>>({});
 
+  const [uploaderOpen, setUploaderOpen] = useState(false);
+
   const [crossfadeFrom, setCrossfadeFrom] = useState(1);
   const [crossfadeTo, setCrossfadeTo] = useState(2);
   const [crossfadeMs, setCrossfadeMs] = useState(3000);
@@ -58,6 +64,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     tracks,
     oneShots,
     masterVolume,
+    groups,
     loadTrackFromUrl,
     loadOneShotFromUrl,
     play,
@@ -71,6 +78,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     setMuted,
     removeTrack,
     setMasterVolume,
+    setGroupVolume,
     triggerOneShot,
     setOneShotVolume,
     removeOneShotSlot,
@@ -137,7 +145,12 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     }
     setMusicLoadState((prev) => ({ ...prev, [slotIndex]: { status: "loading" } }));
     try {
-      await loadTrackFromUrl(musicTrackId(slotIndex), file.filename, file.playbackUrl);
+      await loadTrackFromUrl(
+        musicTrackId(slotIndex),
+        file.filename,
+        file.playbackUrl,
+        musicGroupId(slotIndex)
+      );
       setMusicLoadState((prev) => ({ ...prev, [slotIndex]: { status: "loaded" } }));
     } catch {
       setMusicLoadState((prev) => ({
@@ -262,7 +275,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   async function assignMusicSlot(slotIndex: number, audioFileId: string) {
     setMusicAssigning((prev) => ({ ...prev, [slotIndex]: true }));
     setMusicSlotErrors((prev) => ({ ...prev, [slotIndex]: null }));
-    const result = await patchMusicSlot(slotIndex, { audioFileId });
+    const result = await patchMusicSlot(slotIndex, { audioFileId, name: null });
     if (!result.ok) {
       if (result.status === 409) {
         setMusicSlotErrors((prev) => ({
@@ -282,7 +295,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
 
   async function clearMusicSlot(slotIndex: number) {
     setMusicAssigning((prev) => ({ ...prev, [slotIndex]: true }));
-    const result = await patchMusicSlot(slotIndex, { audioFileId: null });
+    const result = await patchMusicSlot(slotIndex, { audioFileId: null, name: null });
     if (result.ok) setMusicSlotErrors((prev) => ({ ...prev, [slotIndex]: null }));
     setMusicAssigning((prev) => ({ ...prev, [slotIndex]: false }));
   }
@@ -341,6 +354,27 @@ export function SceneClient({ sceneId }: SceneClientProps) {
         : prev
     );
     void patchMusicSlot(slotIndex, { loop });
+  }
+
+  function toggleColumnLoop(slotIndexes: number[]) {
+    if (!scene) return;
+    const allLooping = slotIndexes.every(
+      (i) => scene.musicSlots.find((s) => s.slotIndex === i)?.loop
+    );
+    const next = !allLooping;
+    for (const i of slotIndexes) handleMusicLoop(i, next);
+  }
+
+  function handleMusicName(slotIndex: number, name: string | null) {
+    setScene((prev) =>
+      prev
+        ? replaceMusicSlot(prev, {
+            ...prev.musicSlots.find((s) => s.slotIndex === slotIndex)!,
+            name,
+          })
+        : prev
+    );
+    void patchMusicSlot(slotIndex, { name });
   }
 
   function handleMusicMute(slotIndex: number, muted: boolean) {
@@ -436,6 +470,14 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   );
   const filledMusicCount = scene.musicSlots.filter((s) => s.audioFileId).length;
   const filledOneShotCount = scene.oneShotSlots.filter((s) => s.audioFileId).length;
+  const musicColumns = [
+    {
+      id: "left",
+      label: "Vänsterkolumnen",
+      slots: scene.musicSlots.slice(0, MUSIC_COLUMN_SIZE),
+    },
+    { id: "right", label: "Högerkolumnen", slots: scene.musicSlots.slice(MUSIC_COLUMN_SIZE) },
+  ];
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-8 px-4 py-8 sm:px-6 sm:py-12">
@@ -450,6 +492,31 @@ export function SceneClient({ sceneId }: SceneClientProps) {
           <p className="mt-1 text-sm text-muted-foreground">{scene.description}</p>
         )}
       </div>
+
+      <FavoriteScenesBar currentSceneId={scene.id} />
+
+      <section className="rounded-lg border border-border bg-surface p-4 shadow-xs">
+        <button
+          type="button"
+          onClick={() => setUploaderOpen((open) => !open)}
+          aria-expanded={uploaderOpen}
+          className="flex w-full items-center justify-between text-left"
+        >
+          <span className="font-display text-lg font-medium tracking-wide text-parchment-100">
+            Ladda upp ljud
+          </span>
+          <span className="text-xs text-muted-foreground">{uploaderOpen ? "Dölj" : "Visa"}</span>
+        </button>
+        {uploaderOpen && (
+          <div className="mt-3">
+            <AudioUploader
+              sceneId={sceneId}
+              onUploaded={() => void fetchAll()}
+              onAssigned={() => void fetchAll()}
+            />
+          </div>
+        )}
+      </section>
 
       <section>
         <div className="flex items-center justify-between">
@@ -502,31 +569,74 @@ export function SceneClient({ sceneId }: SceneClientProps) {
           </div>
         </div>
 
-        <div className="mt-3 grid grid-flow-col grid-cols-2 grid-rows-5 gap-3">
-          {scene.musicSlots.map((slot) => (
-            <MusicSlotRow
-              key={slot.slotIndex}
-              slot={slot}
-              file={slot.audioFileId ? (audioFilesById.get(slot.audioFileId) ?? null) : null}
-              libraryFiles={musicLibraryFiles}
-              track={tracks[musicTrackId(slot.slotIndex)]}
-              loadState={musicLoadState[slot.slotIndex] ?? { status: "idle" }}
-              assigning={musicAssigning[slot.slotIndex] ?? false}
-              assignError={musicSlotErrors[slot.slotIndex] ?? null}
-              onAssign={(audioFileId) => void assignMusicSlot(slot.slotIndex, audioFileId)}
-              onClear={() => void clearMusicSlot(slot.slotIndex)}
-              onRetry={() => {
-                if (slot.audioFileId) void loadMusicAudio(slot.slotIndex, slot.audioFileId);
-              }}
-              onFadeIn={() => fadeIn(musicTrackId(slot.slotIndex), slot.fade.fadeInMs)}
-              onFadeOut={() => fadeOut(musicTrackId(slot.slotIndex), slot.fade.fadeOutMs)}
-              onStop={() => stop(musicTrackId(slot.slotIndex))}
-              onVolumeChange={(volume) => handleMusicVolume(slot.slotIndex, volume)}
-              onLoopChange={(loop) => handleMusicLoop(slot.slotIndex, loop)}
-              onMuteChange={(muted) => handleMusicMute(slot.slotIndex, muted)}
-              onFadeSettingsChange={(fade) => handleFadeSettingsChange(slot.slotIndex, fade)}
-            />
-          ))}
+        <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {musicColumns.map((column) => {
+            const allLooping =
+              column.slots.length > 0 && column.slots.every((s) => s.loop);
+            const busVolume = groups[column.id]?.volume ?? 1;
+            return (
+              <div key={column.id} className="flex flex-col gap-3">
+                <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2 shadow-xs">
+                  <SpeakerOnIcon className="h-4 w-4 flex-none text-muted-foreground" />
+                  <Slider
+                    value={busVolume}
+                    onChange={(v) => setGroupVolume(column.id, v)}
+                    className="w-full"
+                    aria-label={`Bussvolym för ${column.label.toLowerCase()}`}
+                  />
+                  <span className="w-9 flex-none text-right font-mono text-xs text-muted-foreground">
+                    {Math.round(busVolume * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => toggleColumnLoop(column.slots.map((s) => s.slotIndex))}
+                    aria-pressed={allLooping}
+                    aria-label={
+                      allLooping
+                        ? `Stäng av loop för ${column.label.toLowerCase()}`
+                        : `Loopa ${column.label.toLowerCase()}`
+                    }
+                    title="Loopa alla i kolumnen"
+                    className={`flex h-8 w-8 flex-none items-center justify-center rounded-md border transition ${
+                      allLooping
+                        ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
+                        : "border-border-strong text-muted-foreground hover:border-ember-400/40 hover:text-ember-300"
+                    }`}
+                  >
+                    <LoopIcon className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  {column.slots.map((slot) => (
+                    <MusicSlotRow
+                      key={slot.slotIndex}
+                      slot={slot}
+                      file={slot.audioFileId ? (audioFilesById.get(slot.audioFileId) ?? null) : null}
+                      libraryFiles={musicLibraryFiles}
+                      track={tracks[musicTrackId(slot.slotIndex)]}
+                      loadState={musicLoadState[slot.slotIndex] ?? { status: "idle" }}
+                      assigning={musicAssigning[slot.slotIndex] ?? false}
+                      assignError={musicSlotErrors[slot.slotIndex] ?? null}
+                      onAssign={(audioFileId) => void assignMusicSlot(slot.slotIndex, audioFileId)}
+                      onClear={() => void clearMusicSlot(slot.slotIndex)}
+                      onRetry={() => {
+                        if (slot.audioFileId) void loadMusicAudio(slot.slotIndex, slot.audioFileId);
+                      }}
+                      onFadeIn={() => fadeIn(musicTrackId(slot.slotIndex), slot.fade.fadeInMs)}
+                      onFadeOut={() => fadeOut(musicTrackId(slot.slotIndex), slot.fade.fadeOutMs)}
+                      onStop={() => stop(musicTrackId(slot.slotIndex))}
+                      onVolumeChange={(volume) => handleMusicVolume(slot.slotIndex, volume)}
+                      onLoopChange={(loop) => handleMusicLoop(slot.slotIndex, loop)}
+                      onMuteChange={(muted) => handleMusicMute(slot.slotIndex, muted)}
+                      onFadeSettingsChange={(fade) => handleFadeSettingsChange(slot.slotIndex, fade)}
+                      onRename={(name) => handleMusicName(slot.slotIndex, name)}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {loadedMusicTrackIds.length >= 2 && (

@@ -6,7 +6,6 @@ import { deleteObject } from "@/lib/storage";
 
 const updateAudioFileSchema = z.object({
   category: z.enum(AUDIO_CATEGORIES).nullable().optional(),
-  tags: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
 });
 
 type RouteParams = { params: Promise<{ id: string }> };
