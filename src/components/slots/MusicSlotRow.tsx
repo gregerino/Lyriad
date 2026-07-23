@@ -81,7 +81,7 @@ export function MusicSlotRow({
             disabled={assigning}
             aria-label="Rensa plats"
             title="Rensa plats"
-            className="flex h-6 w-6 flex-none items-center justify-center rounded-full text-muted-foreground/80 transition hover:bg-ink-700 hover:text-wine-400 disabled:opacity-30"
+            className="focus-ring flex h-6 w-6 flex-none items-center justify-center rounded-full text-muted-foreground/80 transition hover:bg-ink-700 hover:text-wine-400 disabled:opacity-30"
           >
             <XIcon className="h-3.5 w-3.5" />
           </button>
@@ -107,7 +107,7 @@ export function MusicSlotRow({
             }}
             title={file?.filename}
             aria-label="Namn på musikplats"
-            className="min-w-0 flex-1 truncate rounded bg-transparent text-sm font-medium text-parchment-100 focus:bg-background focus:outline-none focus:ring-1 focus:ring-ember-400"
+            className="focus-ring min-w-0 flex-1 truncate rounded bg-transparent text-sm font-medium text-parchment-100 focus:bg-background"
           />
           {track && (
             <span className="flex-none font-mono text-[11px] text-muted-foreground">
@@ -116,26 +116,33 @@ export function MusicSlotRow({
           )}
         </div>
       ) : (
-        <AudioFileSelect
-          files={libraryFiles}
-          disabled={assigning}
-          onSelect={onAssign}
-          placeholder="Tilldela fil…"
-          className="w-full rounded-md border border-border-strong bg-background px-2 py-1.5 text-xs text-parchment-100 focus:border-ember-400 focus:outline-none disabled:opacity-40"
-        />
+        <>
+          <AudioFileSelect
+            files={libraryFiles}
+            disabled={assigning}
+            onSelect={onAssign}
+            placeholder="Tilldela fil…"
+            className="focus-ring w-full rounded-md border border-border-strong bg-background px-2 py-1.5 text-xs text-parchment-100 focus:border-ember-400 disabled:opacity-40"
+          />
+          {libraryFiles.length === 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              Inga ljudfiler ännu — ladda upp i biblioteket.
+            </p>
+          )}
+        </>
       )}
       {assigning && <span className="text-xs text-muted-foreground">Tilldelar…</span>}
-      {assignError && <p className="text-xs text-wine-400">{assignError}</p>}
+      {assignError && <p className="text-xs text-danger-foreground">{assignError}</p>}
       {loadState.status === "loading" && (
         <p className="text-xs text-muted-foreground">Laddar ljud…</p>
       )}
       {loadState.status === "error" && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          <p className="text-xs text-wine-400">{loadState.message}</p>
+          <p className="text-xs text-danger-foreground">{loadState.message}</p>
           <button
             type="button"
             onClick={onRetry}
-            className="text-xs text-ember-400 hover:text-ember-300"
+            className="focus-ring rounded-sm text-xs text-ember-400 hover:text-ember-300"
           >
             Försök igen
           </button>
@@ -166,7 +173,7 @@ export function MusicSlotRow({
               aria-pressed={track.loop}
               aria-label={track.loop ? "Loop på" : "Loop av"}
               title="Loop"
-              className={`flex h-8 w-8 flex-none items-center justify-center rounded-md border transition ${
+              className={`focus-ring flex h-8 w-8 flex-none items-center justify-center rounded-md border transition ${
                 track.loop
                   ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
                   : "border-border-strong text-muted-foreground hover:border-ember-400/40 hover:text-ember-300"
@@ -181,7 +188,7 @@ export function MusicSlotRow({
               aria-pressed={track.muted}
               aria-label={track.muted ? "Avmuta" : "Muta"}
               title={track.muted ? "Avmuta" : "Muta"}
-              className={`flex h-8 w-8 flex-none items-center justify-center rounded-md border transition ${
+              className={`focus-ring flex h-8 w-8 flex-none items-center justify-center rounded-md border transition ${
                 track.muted
                   ? "border-wine-500/60 bg-wine-500/10 text-wine-400"
                   : "border-border-strong text-muted-foreground hover:border-ember-400/40 hover:text-ember-300"
@@ -202,7 +209,7 @@ export function MusicSlotRow({
               type="button"
               onClick={onFadeIn}
               disabled={track.isPlaying}
-              className="rounded-md border border-border-strong px-2 py-1 transition enabled:hover:border-ember-400/60 enabled:hover:text-ember-300 disabled:opacity-30"
+              className="focus-ring rounded-md border border-border-strong px-2 py-1 transition enabled:hover:border-ember-400/60 enabled:hover:text-ember-300 disabled:opacity-30"
             >
               In
             </button>
@@ -210,14 +217,14 @@ export function MusicSlotRow({
               type="button"
               onClick={onFadeOut}
               disabled={!track.isPlaying}
-              className="rounded-md border border-border-strong px-2 py-1 transition enabled:hover:border-ember-400/60 enabled:hover:text-ember-300 disabled:opacity-30"
+              className="focus-ring rounded-md border border-border-strong px-2 py-1 transition enabled:hover:border-ember-400/60 enabled:hover:text-ember-300 disabled:opacity-30"
             >
               Ut
             </button>
             <button
               type="button"
               onClick={onStop}
-              className="rounded-md border border-border-strong px-2 py-1 transition hover:border-ember-400/60 hover:text-ember-300"
+              className="focus-ring rounded-md border border-border-strong px-2 py-1 transition hover:border-ember-400/60 hover:text-ember-300"
             >
               Stopp
             </button>
@@ -237,7 +244,7 @@ export function MusicSlotRow({
                     fadeOutMs: slot.fade.fadeOutMs,
                   })
                 }
-                className="w-full min-w-0 rounded border border-border-strong bg-background px-1.5 py-0.5 text-parchment-100 focus:border-ember-400 focus:outline-none"
+                className="focus-ring w-full min-w-0 rounded border border-border-strong bg-background px-1.5 py-0.5 text-parchment-100 focus:border-ember-400"
               />
             </label>
             <label className="flex items-center gap-1">
@@ -253,7 +260,7 @@ export function MusicSlotRow({
                     fadeOutMs: Number(e.target.value),
                   })
                 }
-                className="w-full min-w-0 rounded border border-border-strong bg-background px-1.5 py-0.5 text-parchment-100 focus:border-ember-400 focus:outline-none"
+                className="focus-ring w-full min-w-0 rounded border border-border-strong bg-background px-1.5 py-0.5 text-parchment-100 focus:border-ember-400"
               />
             </label>
           </div>

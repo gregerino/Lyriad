@@ -29,6 +29,13 @@
       "when": 1784807131892,
       "tag": "0003_faithful_vivisector",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784838831242,
+      "tag": "0004_past_spyke",
+      "breakpoints": true
     }
   ]
 }

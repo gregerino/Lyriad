@@ -34,9 +34,9 @@ export function AudioFileSelect({
       }}
       className={
         overlay
-          ? "absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+          ? "focus-ring absolute inset-0 h-full w-full cursor-pointer rounded-lg opacity-0 disabled:cursor-not-allowed"
           : (className ??
-            "rounded-md border border-border-strong bg-background px-2 py-1.5 text-xs text-parchment-100 focus:border-ember-400 focus:outline-none disabled:opacity-40")
+            "focus-ring rounded-md border border-border-strong bg-background px-2 py-1.5 text-xs text-parchment-100 focus:border-ember-400 disabled:opacity-40")
       }
     >
       <option value="" disabled>
@@ -53,7 +53,7 @@ export function AudioFileSelect({
   if (!overlay) return select;
 
   return (
-    <div className="relative">
+    <div className="group relative">
       {overlay}
       {select}
     </div>

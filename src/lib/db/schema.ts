@@ -3,6 +3,7 @@ import {
   boolean,
   check,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   real,
@@ -110,5 +111,28 @@ export const sceneOneshotSlots = pgTable(
     primaryKey({ columns: [table.sceneId, table.slotIndex] }),
     check("scene_oneshot_slots_slot_index_check", sql`${table.slotIndex} BETWEEN 1 AND 20`),
     check("scene_oneshot_slots_volume_check", sql`${table.volume} BETWEEN 0 AND 1`),
+  ]
+);
+
+export const sceneMixPresets = pgTable(
+  "scene_mix_presets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sceneId: uuid("scene_id")
+      .notNull()
+      .references(() => scenes.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    masterVolume: real("master_volume").notNull(),
+    groupVolumes: jsonb("group_volumes").notNull().$type<Record<string, number>>(),
+    slotVolumes: jsonb("slot_volumes").notNull().$type<Record<string, number>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "scene_mix_presets_master_volume_check",
+      sql`${table.masterVolume} BETWEEN 0 AND 1`
+    ),
   ]
 );

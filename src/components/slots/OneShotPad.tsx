@@ -66,20 +66,25 @@ export function OneShotPad({
         {assigning && (
           <span className="text-center text-[10px] text-muted-foreground">Tilldelar…</span>
         )}
-        {assignError && <p className="text-center text-[10px] text-wine-400">{assignError}</p>}
+        {assignError && (
+          <p className="text-center text-[10px] text-danger-foreground">{assignError}</p>
+        )}
+        {libraryFiles.length === 0 && (
+          <p className="text-center text-[10px] text-muted-foreground">Inga ljudfiler ännu</p>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="relative flex aspect-[3/2] flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-xs transition hover:border-border-strong">
+    <div className="relative flex aspect-[3/2] flex-col rounded-lg border border-border bg-surface shadow-xs transition hover:border-border-strong">
       <button
         type="button"
         onClick={onClear}
         disabled={assigning}
         aria-label="Rensa plats"
         title="Rensa plats"
-        className="absolute right-1 top-1 z-20 flex h-6 w-6 flex-none items-center justify-center rounded-full text-muted-foreground/80 transition hover:bg-ink-700 hover:text-wine-400 disabled:opacity-30"
+        className="focus-ring absolute right-1 top-1 z-20 flex h-6 w-6 flex-none items-center justify-center rounded-full text-muted-foreground/80 transition hover:bg-ink-700 hover:text-wine-400 disabled:opacity-30"
       >
         <XIcon className="h-3.5 w-3.5" />
       </button>
@@ -89,7 +94,7 @@ export function OneShotPad({
         onClick={handleTrigger}
         disabled={loadState.status !== "loaded"}
         aria-label={`Spela ${shortName(file?.filename)}`}
-        className="relative isolate flex flex-1 flex-col items-center justify-center gap-1 overflow-hidden px-2 py-2 text-center transition enabled:hover:border-ember-400/40 enabled:active:scale-[0.97] disabled:opacity-40"
+        className="focus-ring relative isolate flex flex-1 flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-center transition enabled:hover:border-ember-400/40 enabled:active:scale-[0.97] disabled:opacity-40"
       >
         <span className="relative z-10 line-clamp-2 text-[11px] font-medium text-parchment-100 sm:text-xs">
           {shortName(file?.filename)}
@@ -100,10 +105,12 @@ export function OneShotPad({
           </span>
         )}
         {pulseKey > 0 && (
-          <span
-            key={pulseKey}
-            className="pointer-events-none absolute inset-0 z-0 rounded-lg bg-ember-400 [animation:pulse-ring_500ms_ease-out_forwards]"
-          />
+          <span className="pointer-events-none absolute inset-0 z-0 overflow-hidden rounded-lg">
+            <span
+              key={pulseKey}
+              className="absolute inset-0 bg-ember-400 [animation:pulse-ring_500ms_ease-out_forwards]"
+            />
+          </span>
         )}
       </button>
 
@@ -112,11 +119,11 @@ export function OneShotPad({
       )}
       {loadState.status === "error" && (
         <div className="flex flex-col items-center gap-0.5 px-2 pb-2">
-          <p className="text-center text-[10px] text-wine-400">{loadState.message}</p>
+          <p className="text-center text-[10px] text-danger-foreground">{loadState.message}</p>
           <button
             type="button"
             onClick={onRetry}
-            className="text-[10px] text-ember-400 hover:text-ember-300"
+            className="focus-ring rounded-sm text-[10px] text-ember-400 hover:text-ember-300"
           >
             Försök igen
           </button>

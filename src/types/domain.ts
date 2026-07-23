@@ -44,6 +44,16 @@ export type Collection = {
   createdAt: string;
 };
 
+export type MixPreset = {
+  id: string;
+  sceneId: string;
+  name: string;
+  masterVolume: number;
+  groupVolumes: Record<string, number>;
+  slotVolumes: Record<string, number>;
+  createdAt: string;
+};
+
 export type Scene = {
   id: string;
   name: string;

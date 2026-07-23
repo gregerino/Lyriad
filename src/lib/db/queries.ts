@@ -5,6 +5,7 @@ import {
   audioFileCollections,
   audioFiles,
   collections,
+  sceneMixPresets,
   sceneMusicSlots,
   sceneOneshotSlots,
   scenes,
@@ -13,6 +14,7 @@ import type {
   AudioCategory,
   AudioFile,
   Collection,
+  MixPreset,
   MusicSlot,
   OneShotSlot,
   Scene,
@@ -60,6 +62,18 @@ function toCollection(row: typeof collections.$inferSelect): Collection {
   return {
     id: row.id,
     name: row.name,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function toMixPreset(row: typeof sceneMixPresets.$inferSelect): MixPreset {
+  return {
+    id: row.id,
+    sceneId: row.sceneId,
+    name: row.name,
+    masterVolume: row.masterVolume,
+    groupVolumes: row.groupVolumes,
+    slotVolumes: row.slotVolumes,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -363,4 +377,37 @@ export async function setCollectionMembers(
 
   if (operations.length === 0) return;
   await db.batch(operations as [(typeof operations)[number], ...(typeof operations)[number][]]);
+}
+
+export async function listMixPresets(sceneId: string): Promise<MixPreset[]> {
+  const rows = await db
+    .select()
+    .from(sceneMixPresets)
+    .where(eq(sceneMixPresets.sceneId, sceneId))
+    .orderBy(asc(sceneMixPresets.createdAt));
+  return rows.map(toMixPreset);
+}
+
+export async function createMixPreset(
+  sceneId: string,
+  input: {
+    name: string;
+    masterVolume: number;
+    groupVolumes: Record<string, number>;
+    slotVolumes: Record<string, number>;
+  }
+): Promise<MixPreset> {
+  const [row] = await db
+    .insert(sceneMixPresets)
+    .values({ sceneId, ...input })
+    .returning();
+  return toMixPreset(row);
+}
+
+export async function deleteMixPreset(sceneId: string, id: string): Promise<boolean> {
+  const [row] = await db
+    .delete(sceneMixPresets)
+    .where(and(eq(sceneMixPresets.sceneId, sceneId), eq(sceneMixPresets.id, id)))
+    .returning({ id: sceneMixPresets.id });
+  return !!row;
 }

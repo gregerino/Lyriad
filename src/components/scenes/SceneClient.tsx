@@ -12,7 +12,14 @@ import type { SlotLoadState } from "@/components/slots/types";
 import { Slider } from "@/components/ui/Slider";
 import { LoopIcon, PauseIcon, PlayIcon, SpeakerOnIcon } from "@/components/ui/icons";
 import { LAST_SCENE_COOKIE } from "@/lib/lastScene";
-import type { AudioFileWithMeta, FadeSettings, MusicSlot, OneShotSlot, Scene } from "@/types/domain";
+import type {
+  AudioFileWithMeta,
+  FadeSettings,
+  MixPreset,
+  MusicSlot,
+  OneShotSlot,
+  Scene,
+} from "@/types/domain";
 
 const musicTrackId = (slotIndex: number) => `music-${slotIndex}`;
 const oneshotTrackId = (slotIndex: number) => `oneshot-${slotIndex}`;
@@ -55,6 +62,13 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   const [crossfadeTo, setCrossfadeTo] = useState(2);
   const [crossfadeMs, setCrossfadeMs] = useState(3000);
   const [crossfadeCurve, setCrossfadeCurve] = useState<FadeCurve>("linear");
+
+  const [mixPresets, setMixPresets] = useState<MixPreset[]>([]);
+  const [savingPreset, setSavingPreset] = useState(false);
+  const [presetName, setPresetName] = useState("");
+  const [presetSubmitting, setPresetSubmitting] = useState(false);
+  const [presetError, setPresetError] = useState<string | null>(null);
+  const [deletingPresetId, setDeletingPresetId] = useState<string | null>(null);
 
   const loadedMusicRef = useRef<Record<number, string>>({});
   const loadedOneshotRef = useRef<Record<number, string>>({});
@@ -100,9 +114,10 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   async function fetchAll() {
     setLoadError(null);
     try {
-      const [sceneRes, filesRes] = await Promise.all([
+      const [sceneRes, filesRes, presetsRes] = await Promise.all([
         fetch(`/api/scenes/${sceneId}`),
         fetch("/api/audio-files"),
+        fetch(`/api/scenes/${sceneId}/mix-presets`),
       ]);
       if (sceneRes.status === 404) {
         setNotFound(true);
@@ -113,6 +128,10 @@ export function SceneClient({ sceneId }: SceneClientProps) {
       const { audioFiles: files } = await filesRes.json();
       setScene(sceneData);
       setAudioFiles(files);
+      if (presetsRes.ok) {
+        const { presets } = await presetsRes.json();
+        setMixPresets(presets);
+      }
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Kunde inte ladda scenen");
     } finally {
@@ -425,6 +444,66 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     );
   }
 
+  function applyMixPreset(preset: MixPreset) {
+    setMasterVolume(preset.masterVolume);
+    for (const [groupId, volume] of Object.entries(preset.groupVolumes)) {
+      setGroupVolume(groupId, volume);
+    }
+    for (const [slotIndexRaw, volume] of Object.entries(preset.slotVolumes)) {
+      handleMusicVolume(Number(slotIndexRaw), volume);
+    }
+  }
+
+  async function saveMixPreset() {
+    const trimmedName = presetName.trim();
+    if (!trimmedName || !scene) return;
+    setPresetSubmitting(true);
+    setPresetError(null);
+    try {
+      const groupVolumes = Object.fromEntries(
+        musicColumns.map((column) => [column.id, groups[column.id]?.volume ?? 1])
+      );
+      const slotVolumes = Object.fromEntries(
+        scene.musicSlots
+          .filter((s) => s.audioFileId)
+          .map((s) => [
+            String(s.slotIndex),
+            tracks[musicTrackId(s.slotIndex)]?.volume ?? s.volume,
+          ])
+      );
+      const res = await fetch(`/api/scenes/${sceneId}/mix-presets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmedName, masterVolume, groupVolumes, slotVolumes }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Kunde inte spara mixen");
+      }
+      const { preset } = await res.json();
+      setMixPresets((prev) => [...prev, preset]);
+      setSavingPreset(false);
+      setPresetName("");
+    } catch (err) {
+      setPresetError(err instanceof Error ? err.message : "Kunde inte spara mixen");
+    } finally {
+      setPresetSubmitting(false);
+    }
+  }
+
+  async function deleteMixPreset(presetId: string) {
+    setDeletingPresetId(presetId);
+    try {
+      const res = await fetch(`/api/scenes/${sceneId}/mix-presets/${presetId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) return;
+      setMixPresets((prev) => prev.filter((p) => p.id !== presetId));
+    } finally {
+      setDeletingPresetId(null);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -437,7 +516,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3">
         <p className="text-sm text-muted-foreground">Scenen hittades inte.</p>
-        <Link href="/scenes" className="text-sm text-ember-400 hover:text-ember-300">
+        <Link href="/scenes" className="focus-ring rounded-sm text-sm text-ember-400 hover:text-ember-300">
           Tillbaka till scener
         </Link>
       </div>
@@ -447,14 +526,14 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   if (loadError || !scene) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3">
-        <p className="text-sm text-wine-400">{loadError ?? "Kunde inte ladda scenen"}</p>
+        <p className="text-sm text-danger-foreground">{loadError ?? "Kunde inte ladda scenen"}</p>
         <button
           type="button"
           onClick={() => {
             setLoading(true);
             void fetchAll();
           }}
-          className="text-sm text-ember-400 hover:text-ember-300"
+          className="focus-ring rounded-sm text-sm text-ember-400 hover:text-ember-300"
         >
           Försök igen
         </button>
@@ -482,7 +561,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-8 px-4 py-8 sm:px-6 sm:py-12">
       <div>
-        <Link href="/scenes" className="text-xs text-muted-foreground hover:text-parchment-200">
+        <Link href="/scenes" className="focus-ring rounded-sm text-xs text-muted-foreground hover:text-parchment-200">
           ← Alla scener
         </Link>
         <h1 className="mt-1 font-display text-2xl font-medium tracking-wide text-parchment-100 sm:text-3xl">
@@ -495,12 +574,18 @@ export function SceneClient({ sceneId }: SceneClientProps) {
 
       <FavoriteScenesBar currentSceneId={scene.id} />
 
+      {filledMusicCount === 0 && filledOneShotCount === 0 && (
+        <p className="rounded-lg border border-dashed border-border-strong/70 bg-surface/50 px-4 py-3 text-sm text-muted-foreground">
+          Den här scenen har inga ljud än — ladda upp ovan eller tilldela filer i platserna nedan.
+        </p>
+      )}
+
       <section className="rounded-lg border border-border bg-surface p-4 shadow-xs">
         <button
           type="button"
           onClick={() => setUploaderOpen((open) => !open)}
           aria-expanded={uploaderOpen}
-          className="flex w-full items-center justify-between text-left"
+          className="focus-ring flex w-full items-center justify-between rounded-md text-left"
         >
           <span className="font-display text-lg font-medium tracking-wide text-parchment-100">
             Ladda upp ljud
@@ -528,6 +613,86 @@ export function SceneClient({ sceneId }: SceneClientProps) {
           </span>
         </div>
 
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="flex-none font-mono text-xs uppercase tracking-[0.15em] text-muted-foreground">
+            Snabbmix
+          </span>
+          {mixPresets.map((preset) => (
+            <span
+              key={preset.id}
+              className="inline-flex items-center gap-1 rounded-full border border-border-strong bg-surface pl-3 pr-1.5 py-1 text-xs text-parchment-200 transition hover:border-ember-400/50"
+            >
+              <button
+                type="button"
+                onClick={() => applyMixPreset(preset)}
+                className="focus-ring rounded-sm font-medium hover:text-ember-300"
+                title={`Applicera "${preset.name}"`}
+              >
+                {preset.name}
+              </button>
+              <button
+                type="button"
+                onClick={() => void deleteMixPreset(preset.id)}
+                disabled={deletingPresetId === preset.id}
+                aria-label={`Ta bort snabbmix ${preset.name}`}
+                title="Ta bort snabbmix"
+                className="focus-ring flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground/80 transition hover:text-danger-foreground disabled:opacity-40"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          {savingPreset ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-ember-400/40 bg-surface py-1 pl-3 pr-1.5">
+              <input
+                type="text"
+                autoFocus
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void saveMixPreset();
+                  if (e.key === "Escape") {
+                    setSavingPreset(false);
+                    setPresetName("");
+                    setPresetError(null);
+                  }
+                }}
+                placeholder="Namn på mixen"
+                className="focus-ring w-32 rounded-sm bg-transparent text-xs text-parchment-100 placeholder:text-muted-foreground"
+              />
+              <button
+                type="button"
+                onClick={() => void saveMixPreset()}
+                disabled={!presetName.trim() || presetSubmitting}
+                className="focus-ring rounded-sm text-xs font-medium text-ember-400 hover:text-ember-300 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {presetSubmitting ? "Sparar…" : "Spara"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSavingPreset(false);
+                  setPresetName("");
+                  setPresetError(null);
+                }}
+                className="focus-ring flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground/80 hover:text-parchment-100"
+                aria-label="Avbryt"
+              >
+                ×
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSavingPreset(true)}
+              className="focus-ring rounded-full border border-dashed border-border-strong px-3 py-1 text-xs text-muted-foreground transition hover:border-ember-400/50 hover:text-ember-300"
+            >
+              + Spara mix
+            </button>
+          )}
+          {presetError && <p className="w-full text-xs text-danger-foreground">{presetError}</p>}
+        </div>
+
         <div className="mt-3 flex flex-wrap items-center gap-4 rounded-lg border border-ember-500/25 bg-gradient-to-r from-ember-950/50 to-surface p-4 shadow-sm">
           <button
             type="button"
@@ -535,7 +700,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
             disabled={loadedMusicTrackIds.length === 0}
             aria-label={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
             title={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
-            className="flex h-12 w-12 flex-none items-center justify-center rounded-full bg-gradient-to-b from-ember-400 to-ember-500 text-ink-950 shadow-glow-sm transition hover:shadow-glow disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
+            className="focus-ring flex h-12 w-12 flex-none items-center justify-center rounded-full bg-gradient-to-b from-ember-400 to-ember-500 text-ink-950 shadow-glow-sm transition hover:shadow-glow disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
           >
             {anyMusicPlaying ? (
               <PauseIcon className="h-5 w-5" />
@@ -597,7 +762,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                         : `Loopa ${column.label.toLowerCase()}`
                     }
                     title="Loopa alla i kolumnen"
-                    className={`flex h-8 w-8 flex-none items-center justify-center rounded-md border transition ${
+                    className={`focus-ring flex h-8 w-8 flex-none items-center justify-center rounded-md border transition ${
                       allLooping
                         ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
                         : "border-border-strong text-muted-foreground hover:border-ember-400/40 hover:text-ember-300"
@@ -646,7 +811,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
               <select
                 value={crossfadeFrom}
                 onChange={(e) => setCrossfadeFrom(Number(e.target.value))}
-                className="rounded-md border border-border-strong bg-background px-2 py-1 text-parchment-100 focus:border-ember-400 focus:outline-none"
+                className="focus-ring rounded-md border border-border-strong bg-background px-2 py-1 text-parchment-100 focus:border-ember-400"
               >
                 {loadedMusicTrackIds.map((s) => (
                   <option key={s.slotIndex} value={s.slotIndex}>
@@ -658,7 +823,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
               <select
                 value={crossfadeTo}
                 onChange={(e) => setCrossfadeTo(Number(e.target.value))}
-                className="rounded-md border border-border-strong bg-background px-2 py-1 text-parchment-100 focus:border-ember-400 focus:outline-none"
+                className="focus-ring rounded-md border border-border-strong bg-background px-2 py-1 text-parchment-100 focus:border-ember-400"
               >
                 {loadedMusicTrackIds.map((s) => (
                   <option key={s.slotIndex} value={s.slotIndex}>
@@ -674,14 +839,14 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                   step={100}
                   value={crossfadeMs}
                   onChange={(e) => setCrossfadeMs(Number(e.target.value))}
-                  className="w-20 rounded border border-border-strong bg-background px-1.5 py-0.5 text-parchment-100 focus:border-ember-400 focus:outline-none"
+                  className="focus-ring w-20 rounded border border-border-strong bg-background px-1.5 py-0.5 text-parchment-100 focus:border-ember-400"
                 />
                 ms
               </label>
               <select
                 value={crossfadeCurve}
                 onChange={(e) => setCrossfadeCurve(e.target.value as FadeCurve)}
-                className="rounded-md border border-border-strong bg-background px-2 py-1 text-xs text-parchment-100 focus:border-ember-400 focus:outline-none"
+                className="focus-ring rounded-md border border-border-strong bg-background px-2 py-1 text-xs text-parchment-100 focus:border-ember-400"
               >
                 <option value="linear">Linjär</option>
                 <option value="exponential">Exponentiell</option>
@@ -694,7 +859,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                   })
                 }
                 disabled={crossfadeFrom === crossfadeTo}
-                className="rounded-md bg-gradient-to-b from-ember-400 to-ember-500 px-3 py-1.5 text-sm font-medium text-ink-950 shadow-sm transition hover:shadow-glow-sm disabled:cursor-not-allowed disabled:opacity-40"
+                className="focus-ring rounded-md bg-gradient-to-b from-ember-400 to-ember-500 px-3 py-1.5 text-sm font-medium text-ink-950 shadow-sm transition hover:shadow-glow-sm disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Crossfade
               </button>

@@ -52,13 +52,13 @@ export function LoginClient() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Lösenord"
             autoFocus
-            className="rounded-md border border-border-strong bg-background px-3 py-2 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400 focus:outline-none"
+            className="focus-ring rounded-md border border-border-strong bg-background px-3 py-2 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400"
           />
-          {error && <p className="text-xs text-wine-400">{error}</p>}
+          {error && <p className="text-xs text-danger-foreground">{error}</p>}
           <button
             type="submit"
             disabled={!password || submitting}
-            className="rounded-md bg-gradient-to-b from-ember-400 to-ember-500 px-4 py-2 text-sm font-medium text-ink-950 shadow-sm transition hover:shadow-glow-sm disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
+            className="focus-ring rounded-md bg-gradient-to-b from-ember-400 to-ember-500 px-4 py-2 text-sm font-medium text-ink-950 shadow-sm transition hover:shadow-glow-sm disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
           >
             {submitting ? "Loggar in…" : "Logga in"}
           </button>

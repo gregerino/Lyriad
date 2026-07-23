@@ -165,7 +165,7 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
               key={c}
               type="button"
               onClick={() => setSelectedCategory(selectedCategory === c ? null : c)}
-              className={`rounded-md border px-2.5 py-1 transition ${
+              className={`focus-ring rounded-md border px-2.5 py-1 transition ${
                 selectedCategory === c
                   ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
                   : "border-border-strong text-parchment-300 hover:border-ember-400/40"
@@ -178,6 +178,8 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
       )}
       {(status.step === "idle" || status.step === "error") && (
         <div
+          role="button"
+          tabIndex={0}
           onDragOver={(e) => {
             e.preventDefault();
             setDragActive(true);
@@ -190,7 +192,13 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
             if (file) void handleFile(file);
           }}
           onClick={() => inputRef.current?.click()}
-          className={`flex cursor-pointer flex-col items-center gap-2 rounded-md border border-dashed p-6 text-center transition-colors ${
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              inputRef.current?.click();
+            }
+          }}
+          className={`focus-ring flex cursor-pointer flex-col items-center gap-2 rounded-md border border-dashed p-6 text-center transition-colors ${
             dragActive
               ? "border-ember-400 bg-surface-elevated"
               : "border-border-strong hover:border-ember-400/40"
@@ -214,7 +222,7 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
       )}
 
       {status.step === "error" && (
-        <p className="text-xs text-wine-400">{status.message}</p>
+        <p className="text-xs text-danger-foreground">{status.message}</p>
       )}
 
       {status.step === "uploading" && (
@@ -246,7 +254,7 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
                 key={`${slot.kind}-${slot.slotIndex}`}
                 type="button"
                 onClick={() => void handleAssign(status.audioFile, slot)}
-                className="rounded-md border border-border-strong bg-background px-3 py-1.5 text-xs text-parchment-100 transition hover:border-ember-400/60 hover:text-ember-300"
+                className="focus-ring rounded-md border border-border-strong bg-background px-3 py-1.5 text-xs text-parchment-100 transition hover:border-ember-400/60 hover:text-ember-300"
               >
                 {slotLabel(slot)}
               </button>
@@ -255,7 +263,7 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
           <button
             type="button"
             onClick={() => setStatus({ step: "done", audioFile: status.audioFile })}
-            className="self-start text-xs text-muted-foreground hover:text-parchment-100"
+            className="focus-ring self-start rounded-sm text-xs text-muted-foreground hover:text-parchment-100"
           >
             Hoppa över
           </button>
@@ -277,7 +285,7 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
           <button
             type="button"
             onClick={reset}
-            className="self-start text-xs text-ember-400 hover:text-ember-300"
+            className="focus-ring self-start rounded-sm text-xs text-ember-400 hover:text-ember-300"
           >
             Ladda upp en till
           </button>

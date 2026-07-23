@@ -129,7 +129,7 @@ export function ScenesClient() {
       </div>
 
       {loading && <p className="text-sm text-muted-foreground">Laddar…</p>}
-      {error && <p className="text-sm text-wine-400">{error}</p>}
+      {error && <p className="text-sm text-danger-foreground">{error}</p>}
 
       {!loading && !error && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -144,7 +144,7 @@ export function ScenesClient() {
                   if (e.key === "Escape") cancelCreating();
                 }}
                 placeholder="Namn, t.ex. Krogen i Silverbäcken"
-                className="rounded-md border border-border-strong bg-background px-3 py-1.5 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400 focus:outline-none"
+                className="focus-ring rounded-md border border-border-strong bg-background px-3 py-1.5 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400"
               />
               <input
                 type="text"
@@ -155,15 +155,15 @@ export function ScenesClient() {
                   if (e.key === "Escape") cancelCreating();
                 }}
                 placeholder="Beskrivning (valfritt)"
-                className="rounded-md border border-border-strong bg-background px-3 py-1.5 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400 focus:outline-none"
+                className="focus-ring rounded-md border border-border-strong bg-background px-3 py-1.5 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400"
               />
-              {createError && <p className="text-xs text-wine-400">{createError}</p>}
+              {createError && <p className="text-xs text-danger-foreground">{createError}</p>}
               <div className="mt-auto flex items-center gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => void createScene()}
                   disabled={!name.trim() || submitting}
-                  className="rounded-md bg-gradient-to-b from-ember-400 to-ember-500 px-3 py-1.5 text-sm font-medium text-ink-950 shadow-sm transition hover:shadow-glow-sm disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
+                  className="focus-ring rounded-md bg-gradient-to-b from-ember-400 to-ember-500 px-3 py-1.5 text-sm font-medium text-ink-950 shadow-sm transition hover:shadow-glow-sm disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
                 >
                   {submitting ? "Skapar…" : "Skapa scen"}
                 </button>
@@ -171,7 +171,7 @@ export function ScenesClient() {
                   type="button"
                   onClick={cancelCreating}
                   disabled={submitting}
-                  className="rounded-md px-3 py-1.5 text-sm font-medium text-parchment-400 transition hover:text-ember-300 disabled:opacity-40"
+                  className="focus-ring rounded-md px-3 py-1.5 text-sm font-medium text-parchment-400 transition hover:text-ember-300 disabled:opacity-40"
                 >
                   Avbryt
                 </button>
@@ -181,7 +181,7 @@ export function ScenesClient() {
             <button
               type="button"
               onClick={startCreating}
-              className="flex min-h-[9.5rem] flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border-strong text-muted-foreground transition hover:border-ember-400/50 hover:text-ember-300"
+              className="focus-ring flex min-h-[9.5rem] flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border-strong text-muted-foreground transition hover:border-ember-400/50 hover:text-ember-300"
             >
               <PlusIcon className="h-5 w-5" />
               <span className="text-sm font-medium">Ny scen</span>
@@ -197,7 +197,7 @@ export function ScenesClient() {
               >
                 <Link
                   href={`/scenes/${scene.id}`}
-                  className="flex min-h-[9.5rem] flex-col gap-2 p-4 pr-14"
+                  className="focus-ring flex min-h-[9.5rem] flex-col gap-2 rounded-lg p-4 pr-14"
                 >
                   <p className="font-display text-lg font-medium tracking-wide text-parchment-100">
                     {scene.name}
@@ -221,7 +221,7 @@ export function ScenesClient() {
                       scene.favorite ? `Ta bort ${scene.name} som favorit` : `Gör ${scene.name} till favorit`
                     }
                     title={scene.favorite ? "Ta bort som favorit" : "Gör till favorit"}
-                    className={`flex-none transition ${
+                    className={`focus-ring flex-none rounded-full transition focus-visible:opacity-100 ${
                       scene.favorite
                         ? "text-ember-400 hover:text-ember-300"
                         : "text-muted-foreground/60 opacity-0 group-hover:opacity-100 hover:text-ember-300"
@@ -235,7 +235,7 @@ export function ScenesClient() {
                     disabled={deletingId === scene.id}
                     aria-label={`Ta bort ${scene.name}`}
                     title="Ta bort scen"
-                    className="flex-none text-muted-foreground/80 opacity-0 transition group-hover:opacity-100 hover:text-wine-400 disabled:opacity-40"
+                    className="focus-ring flex-none rounded-full text-muted-foreground/80 opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 hover:text-wine-400 disabled:opacity-40"
                   >
                     <XIcon className="h-4 w-4" />
                   </button>

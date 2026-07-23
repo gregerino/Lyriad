@@ -183,7 +183,7 @@ export default function StyleGuidePage() {
             — guld, koppar, glödande orange — reserverad för det som går att
             interagera med.{" "}
             <span className="text-parchment-300">parchment</span> bär text.{" "}
-            <span className="text-wine-400">wine</span> är reserverad för
+            <span className="text-danger-foreground">wine</span> är reserverad för
             destruktiva åtgärder.
           </p>
           <div className="mt-8 flex flex-col gap-8">
@@ -305,25 +305,25 @@ export default function StyleGuidePage() {
           <div className="mt-8 flex flex-wrap items-center gap-4">
             <button
               type="button"
-              className="rounded-md bg-gradient-to-b from-ember-400 to-ember-500 px-5 py-2.5 text-sm font-medium text-ink-950 shadow-sm transition hover:shadow-glow-sm active:from-ember-500 active:to-ember-600"
+              className="focus-ring rounded-md bg-gradient-to-b from-ember-400 to-ember-500 px-5 py-2.5 text-sm font-medium text-ink-950 shadow-sm transition hover:shadow-glow-sm active:from-ember-500 active:to-ember-600"
             >
               Primary
             </button>
             <button
               type="button"
-              className="rounded-md border border-border-strong bg-surface px-5 py-2.5 text-sm font-medium text-parchment-100 transition hover:border-ember-400/60 hover:text-ember-300"
+              className="focus-ring rounded-md border border-border-strong bg-surface px-5 py-2.5 text-sm font-medium text-parchment-100 transition hover:border-ember-400/60 hover:text-ember-300"
             >
               Secondary
             </button>
             <button
               type="button"
-              className="rounded-md px-5 py-2.5 text-sm font-medium text-parchment-400 transition hover:text-ember-300"
+              className="focus-ring rounded-md px-5 py-2.5 text-sm font-medium text-parchment-400 transition hover:text-ember-300"
             >
               Ghost
             </button>
             <button
               type="button"
-              className="rounded-md border border-wine-600/60 bg-wine-600/10 px-5 py-2.5 text-sm font-medium text-wine-400 transition hover:bg-wine-600/20 hover:text-wine-400"
+              className="focus-ring rounded-md border border-wine-600/60 bg-wine-600/10 px-5 py-2.5 text-sm font-medium text-danger-foreground transition hover:bg-wine-600/20"
             >
               Destructive
             </button>
@@ -337,7 +337,7 @@ export default function StyleGuidePage() {
             <button
               type="button"
               aria-label="Mer"
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-border-strong bg-surface text-parchment-300 transition hover:border-ember-400/60 hover:text-ember-300"
+              className="focus-ring flex h-9 w-9 items-center justify-center rounded-full border border-border-strong bg-surface text-parchment-300 transition hover:border-ember-400/60 hover:text-ember-300"
             >
               <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
                 <circle cx="12" cy="5" r="1.6" />
@@ -360,8 +360,8 @@ export default function StyleGuidePage() {
                   type="button"
                   className={
                     i === 2
-                      ? "rounded-full bg-ember-400 px-4 py-1.5 text-sm font-medium text-ink-950 shadow-glow-sm"
-                      : "rounded-full px-4 py-1.5 text-sm font-medium text-parchment-400 transition hover:text-parchment-100"
+                      ? "focus-ring rounded-full bg-ember-400 px-4 py-1.5 text-sm font-medium text-ink-950 shadow-glow-sm"
+                      : "focus-ring rounded-full px-4 py-1.5 text-sm font-medium text-parchment-400 transition hover:text-parchment-100"
                   }
                 >
                   {label}
@@ -387,7 +387,7 @@ export default function StyleGuidePage() {
             <button
               type="button"
               aria-label="Lägg till tagg"
-              className="flex h-8 w-8 items-center justify-center rounded-md border border-dashed border-border-strong text-parchment-500 transition hover:border-ember-400/60 hover:text-ember-300"
+              className="focus-ring flex h-8 w-8 items-center justify-center rounded-md border border-dashed border-border-strong text-parchment-500 transition hover:border-ember-400/60 hover:text-ember-300"
             >
               +
             </button>

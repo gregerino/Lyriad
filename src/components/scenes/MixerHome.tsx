@@ -64,7 +64,7 @@ export function MixerHome() {
               if (e.key === "Enter") void createScene();
             }}
             placeholder="Namn, t.ex. Krogen i Silverbäcken"
-            className="flex-1 rounded-md border border-border-strong bg-background px-3 py-1.5 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400 focus:outline-none"
+            className="focus-ring flex-1 rounded-md border border-border-strong bg-background px-3 py-1.5 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400"
           />
           <input
             type="text"
@@ -74,18 +74,18 @@ export function MixerHome() {
               if (e.key === "Enter") void createScene();
             }}
             placeholder="Beskrivning (valfritt)"
-            className="flex-1 rounded-md border border-border-strong bg-background px-3 py-1.5 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400 focus:outline-none"
+            className="focus-ring flex-1 rounded-md border border-border-strong bg-background px-3 py-1.5 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400"
           />
           <button
             type="button"
             onClick={() => void createScene()}
             disabled={!name.trim() || submitting}
-            className="rounded-md bg-gradient-to-b from-ember-400 to-ember-500 px-4 py-1.5 text-sm font-medium text-ink-950 shadow-sm transition hover:shadow-glow-sm disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
+            className="focus-ring rounded-md bg-gradient-to-b from-ember-400 to-ember-500 px-4 py-1.5 text-sm font-medium text-ink-950 shadow-sm transition hover:shadow-glow-sm disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
           >
             {submitting ? "Skapar…" : "Skapa scen"}
           </button>
         </div>
-        {error && <p className="mt-2 text-xs text-wine-400">{error}</p>}
+        {error && <p className="mt-2 text-xs text-danger-foreground">{error}</p>}
       </div>
 
       <section className="rounded-lg border border-border bg-surface p-4 shadow-xs">
@@ -93,7 +93,7 @@ export function MixerHome() {
           type="button"
           onClick={() => setUploaderOpen((open) => !open)}
           aria-expanded={uploaderOpen}
-          className="flex w-full items-center justify-between text-left"
+          className="focus-ring flex w-full items-center justify-between rounded-md text-left"
         >
           <span className="font-display text-lg font-medium tracking-wide text-parchment-100">
             Ladda upp ljud
@@ -172,6 +172,7 @@ export function MixerHome() {
               <span className="text-[10px] font-medium text-muted-foreground">
                 {String(i + 1).padStart(2, "0")}
               </span>
+              <span className="text-[10px] text-muted-foreground">Skapa en scen</span>
             </div>
           ))}
         </div>

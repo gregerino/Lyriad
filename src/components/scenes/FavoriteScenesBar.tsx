@@ -40,7 +40,7 @@ export function FavoriteScenesBar({ currentSceneId }: FavoriteScenesBarProps) {
         <Link
           key={scene.id}
           href={`/scenes/${scene.id}`}
-          className="inline-flex items-center gap-1.5 rounded-full border border-ember-400/40 bg-ember-400/10 px-3 py-1 text-xs font-medium text-ember-300 transition hover:bg-ember-400/20"
+          className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-ember-400/40 bg-ember-400/10 px-3 py-1 text-xs font-medium text-ember-300 transition hover:bg-ember-400/20"
         >
           <StarIcon className="h-3 w-3" filled />
           {scene.name}

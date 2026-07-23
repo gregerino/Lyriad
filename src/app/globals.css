@@ -46,6 +46,7 @@
   --color-parchment-700: #4a4234;
 
   /* ---- wine: a narrow, muted accent reserved for danger/destructive states ---- */
+  --color-wine-300: #c9756f;
   --color-wine-400: #b2544f;
   --color-wine-500: #92352f;
   --color-wine-600: #742620;
@@ -67,6 +68,7 @@
 
   --color-danger: var(--color-wine-500);
   --color-danger-hover: var(--color-wine-400);
+  --color-danger-foreground: var(--color-wine-300);
 
   /* ---- radius: soft, slightly generous — not sharp, not pill-happy ---- */
   --radius-sm: 0.3125rem;
@@ -140,6 +142,20 @@ body {
   animation: page-fade 260ms ease-out;
 }
 
+/* Shared keyboard-focus treatment for every interactive element — a glowing
+   ring that only shows for keyboard/AT focus (:focus-visible), never on a
+   mouse click, since the low-contrast borders elsewhere aren't enough on
+   their own to satisfy a visible focus indicator. */
+.focus-ring {
+  outline: none;
+  border-radius: inherit;
+}
+
+.focus-ring:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-glow-sm);
+}
+
 /* Shared range-input styling — an ember-filled track with a glowing thumb,
    used anywhere a mixer volume slider appears. */
 .lyriad-slider {
@@ -181,6 +197,23 @@ body {
   background: var(--color-ember-300);
   box-shadow: var(--shadow-glow-sm);
   cursor: pointer;
+}
+
+/* A focused fader needs to be unmistakable even though the track itself is
+   thin and low-contrast — bump the thumb to the larger glow on keyboard
+   focus. outline is kept transparent (not `none`) so forced-colors mode
+   still gets a visible ring. */
+.lyriad-slider:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+
+.lyriad-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: var(--shadow-glow);
+}
+
+.lyriad-slider:focus-visible::-moz-range-thumb {
+  box-shadow: var(--shadow-glow);
 }
 
 .lyriad-slider::-moz-range-track {

@@ -57,6 +57,8 @@ export function LibraryClient() {
     });
   }, [audioFiles, search, categoryFilter, collectionFilter]);
 
+  const isFiltered = search.trim() !== "" || categoryFilter !== "all" || collectionFilter !== "all";
+
   const collectionFileCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const file of audioFiles) {
@@ -133,21 +135,26 @@ export function LibraryClient() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 bg-zinc-950 px-6 py-12 text-zinc-50">
-      <h1 className="text-2xl font-semibold tracking-tight">Ljudbibliotek</h1>
+    <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12">
+      <div>
+        <p className="font-mono text-xs uppercase tracking-[0.2em] text-ember-400">Lyriad</p>
+        <h1 className="mt-1 font-display text-2xl font-medium tracking-wide text-parchment-100 sm:text-3xl">
+          Ljudbibliotek
+        </h1>
+      </div>
 
       <AudioUploader onUploaded={() => void loadAll()} />
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-        <h2 className="text-sm font-medium text-zinc-200">Samlingar</h2>
+      <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
+        <h2 className="text-sm font-medium text-parchment-100">Samlingar</h2>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setCollectionFilter("all")}
-            className={`rounded-md border px-2.5 py-1 text-xs ${
+            className={`focus-ring rounded-md border px-2.5 py-1 text-xs transition ${
               collectionFilter === "all"
-                ? "border-amber-400 text-amber-400"
-                : "border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
+                : "border-border-strong text-parchment-300 hover:border-ember-400/40"
             }`}
           >
             Alla filer
@@ -157,10 +164,10 @@ export function LibraryClient() {
               <button
                 type="button"
                 onClick={() => setCollectionFilter(collection.id)}
-                className={`rounded-md border px-2.5 py-1 text-xs ${
+                className={`focus-ring rounded-md border px-2.5 py-1 text-xs transition ${
                   collectionFilter === collection.id
-                    ? "border-amber-400 text-amber-400"
-                    : "border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                    ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
+                    : "border-border-strong text-parchment-300 hover:border-ember-400/40"
                 }`}
               >
                 {collection.name} ({collectionFileCounts.get(collection.id) ?? 0})
@@ -168,13 +175,16 @@ export function LibraryClient() {
               <button
                 type="button"
                 onClick={() => void deleteCollection(collection.id)}
-                className="text-xs text-zinc-500 hover:text-red-400"
+                className="focus-ring rounded-full text-xs text-muted-foreground transition hover:text-danger-foreground"
                 aria-label={`Ta bort samlingen ${collection.name}`}
               >
                 ×
               </button>
             </span>
           ))}
+          {collections.length === 0 && (
+            <span className="text-xs text-muted-foreground">Inga samlingar ännu.</span>
+          )}
         </div>
         <div className="mt-3 flex items-center gap-2">
           <input
@@ -185,12 +195,12 @@ export function LibraryClient() {
               if (e.key === "Enter") void createCollection();
             }}
             placeholder="Ny samling, t.ex. Vinterfestens kampanj"
-            className="flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-amber-400 focus:outline-none"
+            className="focus-ring flex-1 rounded-md border border-border-strong bg-background px-2.5 py-1.5 text-xs text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400"
           />
           <button
             type="button"
             onClick={() => void createCollection()}
-            className="rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-200 hover:border-amber-400"
+            className="focus-ring rounded-md border border-border-strong px-2.5 py-1.5 text-xs text-parchment-200 transition hover:border-ember-400/60 hover:text-ember-300"
           >
             Skapa
           </button>
@@ -203,16 +213,16 @@ export function LibraryClient() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Sök på filnamn…"
-          className="min-w-[16rem] flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-amber-400 focus:outline-none"
+          className="focus-ring min-w-[16rem] flex-1 rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400"
         />
-        <div className="flex items-center gap-1 text-xs">
+        <div className="flex flex-wrap items-center gap-1 text-xs">
           <button
             type="button"
             onClick={() => setCategoryFilter("all")}
-            className={`rounded-md border px-2.5 py-1 ${
+            className={`focus-ring rounded-md border px-2.5 py-1 transition ${
               categoryFilter === "all"
-                ? "border-amber-400 text-amber-400"
-                : "border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
+                : "border-border-strong text-parchment-300 hover:border-ember-400/40"
             }`}
           >
             Alla typer
@@ -222,10 +232,10 @@ export function LibraryClient() {
               key={c}
               type="button"
               onClick={() => setCategoryFilter(c)}
-              className={`rounded-md border px-2.5 py-1 ${
+              className={`focus-ring rounded-md border px-2.5 py-1 transition ${
                 categoryFilter === c
-                  ? "border-amber-400 text-amber-400"
-                  : "border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                  ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
+                  : "border-border-strong text-parchment-300 hover:border-ember-400/40"
               }`}
             >
               {AUDIO_CATEGORY_LABELS[c]}
@@ -235,23 +245,23 @@ export function LibraryClient() {
       </div>
 
       {selectedIds.size > 0 && (
-        <div className="flex flex-col gap-3 rounded-lg border border-amber-400/40 bg-zinc-900 p-4">
+        <div className="flex flex-col gap-3 rounded-lg border border-ember-400/40 bg-surface p-4 shadow-sm">
           <div className="flex items-center justify-between text-sm">
-            <span>{selectedIds.size} filer markerade</span>
+            <span className="text-parchment-100">{selectedIds.size} filer markerade</span>
             <button
               type="button"
               onClick={() => setSelectedIds(new Set())}
-              className="text-xs text-zinc-400 hover:text-zinc-200"
+              className="focus-ring rounded-sm text-xs text-muted-foreground hover:text-parchment-100"
             >
               Avmarkera alla
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <select
               value={bulkTargetCollection}
               onChange={(e) => setBulkTargetCollection(e.target.value)}
-              className="rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-100"
+              className="focus-ring rounded-md border border-border-strong bg-background px-2.5 py-1.5 text-xs text-parchment-100 focus:border-ember-400"
             >
               <option value="">Välj samling…</option>
               {collections.map((collection) => (
@@ -264,7 +274,7 @@ export function LibraryClient() {
               type="button"
               onClick={() => void addSelectionToCollection()}
               disabled={!bulkTargetCollection}
-              className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-200 hover:border-amber-400 disabled:opacity-40"
+              className="focus-ring rounded-md border border-border-strong px-3 py-1.5 text-xs text-parchment-200 transition hover:border-ember-400/60 hover:text-ember-300 disabled:opacity-40"
             >
               Lägg till markerade i samling
             </button>
@@ -272,30 +282,43 @@ export function LibraryClient() {
         </div>
       )}
 
-      {loading && <p className="text-sm text-zinc-400">Laddar…</p>}
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {loading && <p className="text-sm text-muted-foreground">Laddar…</p>}
+      {error && <p className="text-sm text-danger-foreground">{error}</p>}
 
-      {!loading && filtered.length === 0 && (
-        <p className="text-sm text-zinc-500">Inga ljudfiler matchar filtret.</p>
+      {!loading && !error && audioFiles.length === 0 && (
+        <p className="rounded-lg border border-dashed border-border-strong/70 bg-surface/50 px-4 py-6 text-center text-sm text-muted-foreground">
+          Inga ljudfiler ännu — ladda upp din första ovan.
+        </p>
+      )}
+
+      {!loading && !error && audioFiles.length > 0 && filtered.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          {isFiltered
+            ? "Inga ljudfiler matchar filtret."
+            : "Inga ljudfiler att visa."}
+        </p>
       )}
 
       <div className="flex flex-col gap-2">
         {filtered.map((file) => (
           <div
             key={file.id}
-            className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-900 p-3"
+            className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 shadow-xs transition hover:border-border-strong"
           >
             <div className="flex items-start gap-3">
               <input
                 type="checkbox"
                 checked={selectedIds.has(file.id)}
                 onChange={() => toggleSelected(file.id)}
-                className="mt-1"
+                aria-label={`Markera ${file.filename}`}
+                className="focus-ring mt-1 accent-ember-400"
               />
               <div className="flex-1">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="truncate text-sm font-medium text-zinc-100">{file.filename}</p>
-                  <span className="text-xs text-zinc-500">{formatBytes(file.sizeBytes)}</span>
+                  <p className="truncate text-sm font-medium text-parchment-100">{file.filename}</p>
+                  <span className="flex-none font-mono text-xs text-muted-foreground">
+                    {formatBytes(file.sizeBytes)}
+                  </span>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <select
@@ -305,7 +328,7 @@ export function LibraryClient() {
                         category: e.target.value ? (e.target.value as AudioCategory) : null,
                       })
                     }
-                    className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100"
+                    className="focus-ring rounded-md border border-border-strong bg-background px-2 py-1 text-xs text-parchment-100 focus:border-ember-400"
                   >
                     <option value="">Ingen typ</option>
                     {AUDIO_CATEGORIES.map((c) => (
@@ -317,13 +340,13 @@ export function LibraryClient() {
                   {file.collectionIds.map((collectionId) => (
                     <span
                       key={collectionId}
-                      className="flex items-center gap-1 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300"
+                      className="flex items-center gap-1 rounded-full bg-surface-elevated px-2 py-0.5 text-xs text-parchment-300"
                     >
                       {collectionsById.get(collectionId)?.name ?? "Okänd samling"}
                       <button
                         type="button"
                         onClick={() => void removeFileFromCollection(file.id, collectionId)}
-                        className="text-zinc-500 hover:text-red-400"
+                        className="focus-ring rounded-full text-muted-foreground transition hover:text-danger-foreground"
                         aria-label="Ta bort från samling"
                       >
                         ×

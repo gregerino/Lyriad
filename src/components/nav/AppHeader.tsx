@@ -35,13 +35,13 @@ export function AppHeader() {
             onClick={() => setOpen(true)}
             aria-label="Öppna meny"
             aria-expanded={open}
-            className="flex h-9 w-9 flex-none items-center justify-center rounded-md text-parchment-300 transition hover:bg-surface-elevated hover:text-ember-300"
+            className="focus-ring flex h-9 w-9 flex-none items-center justify-center rounded-md text-parchment-300 transition hover:bg-surface-elevated hover:text-ember-300"
           >
             <MenuIcon className="h-5 w-5" />
           </button>
           <Link
             href="/"
-            className="font-display text-sm font-medium tracking-[0.2em] text-parchment-100 uppercase"
+            className="focus-ring rounded-sm font-display text-sm font-medium tracking-[0.2em] text-parchment-100 uppercase"
           >
             Lyriad
           </Link>
@@ -71,7 +71,7 @@ export function AppHeader() {
             type="button"
             onClick={() => setOpen(false)}
             aria-label="Stäng meny"
-            className="flex h-8 w-8 items-center justify-center rounded-md text-parchment-400 transition hover:bg-surface-elevated hover:text-ember-300"
+            className="focus-ring flex h-8 w-8 items-center justify-center rounded-md text-parchment-400 transition hover:bg-surface-elevated hover:text-ember-300"
           >
             <XIcon className="h-4 w-4" />
           </button>
@@ -85,7 +85,7 @@ export function AppHeader() {
               key={item.href}
               href={item.href}
               onClick={() => setOpen(false)}
-              className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition ${
+              className={`focus-ring flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition ${
                 active
                   ? "border-l-2 border-ember-400 bg-ember-400/10 text-ember-300"
                   : "border-l-2 border-transparent text-parchment-300 hover:bg-surface-elevated hover:text-parchment-100"
