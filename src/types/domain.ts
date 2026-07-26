@@ -1,8 +1,3 @@
-export type FadeSettings = {
-  fadeInMs: number;
-  fadeOutMs: number;
-};
-
 export type MusicSlot = {
   sceneId: string;
   slotIndex: number; // 1-10
@@ -10,7 +5,6 @@ export type MusicSlot = {
   name: string | null;
   volume: number; // 0-1
   loop: boolean;
-  fade: FadeSettings;
 };
 
 export type OneShotSlot = {

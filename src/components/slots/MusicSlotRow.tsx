@@ -1,13 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Slider } from "@/components/ui/Slider";
 import { LoopIcon, PlayIcon, SpeakerOffIcon, SpeakerOnIcon, StopIcon, XIcon } from "@/components/ui/icons";
 import { formatDuration } from "@/lib/audio/limits";
 import type { TrackState } from "@/audio-engine";
-import type { AudioFileWithMeta, FadeSettings, MusicSlot } from "@/types/domain";
+import type { AudioFileWithMeta, MusicSlot } from "@/types/domain";
 import { AudioFileSelect } from "./AudioFileSelect";
 import type { SlotLoadState } from "./types";
+
+/**
+ * How often the playhead re-reads the engine while playing. Position isn't in
+ * engine state (it advances continuously), so each playing row polls for it —
+ * fast enough to look live, slow enough that ten of them cost nothing.
+ */
+const POSITION_POLL_MS = 200;
 
 type MusicSlotRowProps = {
   slot: MusicSlot;
@@ -21,13 +28,13 @@ type MusicSlotRowProps = {
   onClear: () => void;
   onRetry: () => void;
   onPlay: () => void;
-  onFadeIn: () => void;
-  onFadeOut: () => void;
   onStop: () => void;
+  onSeek: (positionSeconds: number) => void;
+  /** Must be referentially stable — it drives the playhead's polling effect. */
+  getPosition: (trackId: string) => number;
   onVolumeChange: (volume: number) => void;
   onLoopChange: (loop: boolean) => void;
   onMuteChange: (muted: boolean) => void;
-  onFadeSettingsChange: (fade: FadeSettings) => void;
   onRename: (name: string | null) => void;
 };
 
@@ -43,13 +50,12 @@ export function MusicSlotRow({
   onClear,
   onRetry,
   onPlay,
-  onFadeIn,
-  onFadeOut,
   onStop,
+  onSeek,
+  getPosition,
   onVolumeChange,
   onLoopChange,
   onMuteChange,
-  onFadeSettingsChange,
   onRename,
 }: MusicSlotRowProps) {
   const ready = Boolean(slot.audioFileId) && loadState.status === "loaded" && Boolean(track);
@@ -63,6 +69,36 @@ export function MusicSlotRow({
     setSyncedName(resolvedName);
     setNameDraft(resolvedName);
   }
+
+  // Playhead, in seconds. `scrubTo` holds the value being dragged so the poll
+  // below can't yank the handle back out from under the user mid-drag.
+  const [position, setPosition] = useState(0);
+  const [scrubTo, setScrubTo] = useState<number | null>(null);
+  const trackId = track?.id;
+  const isPlaying = track?.isPlaying ?? false;
+  const duration = track?.duration ?? 0;
+
+  useEffect(() => {
+    if (!trackId) return;
+    const sync = () => setPosition(getPosition(trackId));
+    sync();
+    // A stopped track's position only moves when something else changes it —
+    // a seek, or a reassignment — and those re-sync on their own.
+    if (!isPlaying) return;
+    const timer = setInterval(sync, POSITION_POLL_MS);
+    return () => clearInterval(timer);
+  }, [trackId, isPlaying, duration, getPosition]);
+
+  function commitSeek(positionSeconds: number) {
+    onSeek(positionSeconds);
+    setScrubTo(null);
+    // Read back rather than trusting the input: the engine clamps, and seeking
+    // a non-looping track to its very end finishes it instead (position 0).
+    if (trackId) setPosition(getPosition(trackId));
+  }
+
+  const displayPosition = Math.min(scrubTo ?? position, duration);
+  const remaining = Math.max(0, duration - displayPosition);
 
   function commitName() {
     const trimmed = nameDraft.trim();
@@ -168,6 +204,25 @@ export function MusicSlotRow({
 
       {ready && track && (
         <>
+          <div className="flex flex-col gap-1">
+            <Slider
+              value={Math.round(displayPosition)}
+              min={0}
+              max={Math.max(1, Math.round(track.duration))}
+              step={1}
+              onChange={setScrubTo}
+              onCommit={commitSeek}
+              aria-label="Spola i spåret"
+              aria-valuetext={`${formatDuration(displayPosition)} av ${formatDuration(
+                track.duration
+              )}, ${formatDuration(remaining)} kvar`}
+            />
+            <div className="flex items-center justify-between font-mono text-[11px] text-muted-foreground">
+              <span>{formatDuration(displayPosition)}</span>
+              <span title="Tid kvar">-{formatDuration(remaining)}</span>
+            </div>
+          </div>
+
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -223,60 +278,6 @@ export function MusicSlotRow({
             </button>
 
             {track.fading && <span className="text-xs text-ember-400">fadar…</span>}
-          </div>
-
-          <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
-            <button
-              type="button"
-              onClick={onFadeIn}
-              disabled={track.isPlaying}
-              className="focus-ring rounded-md border border-border-strong px-2 py-1 transition enabled:hover:border-ember-400/60 enabled:hover:text-ember-300 disabled:opacity-30"
-            >
-              In
-            </button>
-            <button
-              type="button"
-              onClick={onFadeOut}
-              disabled={!track.isPlaying}
-              className="focus-ring rounded-md border border-border-strong px-2 py-1 transition enabled:hover:border-ember-400/60 enabled:hover:text-ember-300 disabled:opacity-30"
-            >
-              Ut
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 gap-1.5 text-xs text-muted-foreground">
-            <label className="flex items-center gap-1">
-              In
-              <input
-                type="number"
-                min={0}
-                step={100}
-                value={slot.fade.fadeInMs}
-                onChange={(e) =>
-                  onFadeSettingsChange({
-                    fadeInMs: Number(e.target.value),
-                    fadeOutMs: slot.fade.fadeOutMs,
-                  })
-                }
-                className="focus-ring w-full min-w-0 rounded border border-border-strong bg-background px-1.5 py-0.5 text-parchment-100 focus:border-ember-400"
-              />
-            </label>
-            <label className="flex items-center gap-1">
-              Ut
-              <input
-                type="number"
-                min={0}
-                step={100}
-                value={slot.fade.fadeOutMs}
-                onChange={(e) =>
-                  onFadeSettingsChange({
-                    fadeInMs: slot.fade.fadeInMs,
-                    fadeOutMs: Number(e.target.value),
-                  })
-                }
-                className="focus-ring w-full min-w-0 rounded border border-border-strong bg-background px-1.5 py-0.5 text-parchment-100 focus:border-ember-400"
-              />
-            </label>
           </div>
         </>
       )}

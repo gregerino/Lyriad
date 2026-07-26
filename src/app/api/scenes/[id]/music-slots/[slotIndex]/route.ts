@@ -10,12 +10,6 @@ const patchSchema = z.object({
   name: z.string().trim().min(1).max(100).nullable().optional(),
   volume: z.number().min(0).max(1).optional(),
   loop: z.boolean().optional(),
-  fade: z
-    .object({
-      fadeInMs: z.number().int().min(0),
-      fadeOutMs: z.number().int().min(0),
-    })
-    .optional(),
 });
 
 type RouteParams = { params: Promise<{ id: string; slotIndex: string }> };
@@ -78,11 +72,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     }
   }
 
-  const { fade, ...rest } = parsed.data;
-  const slot = await updateMusicSlot(sceneId, slotIndex, {
-    ...rest,
-    ...(fade ? { fadeInMs: fade.fadeInMs, fadeOutMs: fade.fadeOutMs } : {}),
-  });
+  const slot = await updateMusicSlot(sceneId, slotIndex, parsed.data);
 
   return NextResponse.json({ slot });
 }

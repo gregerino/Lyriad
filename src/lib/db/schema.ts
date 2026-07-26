@@ -81,15 +81,11 @@ export const sceneMusicSlots = pgTable(
     name: text("name"),
     volume: real("volume").notNull().default(0.8),
     loop: boolean("loop").notNull().default(true),
-    fadeInMs: integer("fade_in_ms").notNull().default(0),
-    fadeOutMs: integer("fade_out_ms").notNull().default(0),
   },
   (table) => [
     primaryKey({ columns: [table.sceneId, table.slotIndex] }),
     check("scene_music_slots_slot_index_check", sql`${table.slotIndex} BETWEEN 1 AND 10`),
     check("scene_music_slots_volume_check", sql`${table.volume} BETWEEN 0 AND 1`),
-    check("scene_music_slots_fade_in_ms_check", sql`${table.fadeInMs} >= 0`),
-    check("scene_music_slots_fade_out_ms_check", sql`${table.fadeOutMs} >= 0`),
   ]
 );
 

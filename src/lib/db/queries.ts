@@ -31,7 +31,6 @@ function toMusicSlot(row: typeof sceneMusicSlots.$inferSelect): MusicSlot {
     name: row.name,
     volume: row.volume,
     loop: row.loop,
-    fade: { fadeInMs: row.fadeInMs, fadeOutMs: row.fadeOutMs },
   };
 }
 
@@ -219,8 +218,6 @@ export async function updateMusicSlot(
     name: string | null;
     volume: number;
     loop: boolean;
-    fadeInMs: number;
-    fadeOutMs: number;
   }>
 ): Promise<MusicSlot | null> {
   const [row] = await db

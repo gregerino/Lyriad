@@ -38,6 +38,9 @@ export function useAudioEngine() {
   const play = useCallback((id: string) => engine.play(id), [engine]);
   const pause = useCallback((id: string) => engine.pause(id), [engine]);
   const stop = useCallback((id: string) => engine.stop(id), [engine]);
+  const seek = useCallback((id: string, positionSeconds: number) => engine.seek(id, positionSeconds), [engine]);
+  // Stable identity so components can poll it from an effect without restarting the timer each render.
+  const getPosition = useCallback((id: string) => engine.getPosition(id), [engine]);
   const setVolume = useCallback(
     (id: string, volume: number) => engine.setVolume(id, volume),
     [engine],
@@ -108,6 +111,8 @@ export function useAudioEngine() {
     play,
     pause,
     stop,
+    seek,
+    getPosition,
     setVolume,
     setLoop,
     setMuted,

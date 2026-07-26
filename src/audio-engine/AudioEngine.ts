@@ -191,11 +191,6 @@ export class AudioEngine {
     groupId: string,
     initialVolume = 1,
   ): Promise<void> {
-    // Loading into a slot that already holds a track (re-assigning the slot)
-    // must stop and disconnect the previous one first, or it keeps playing
-    // silently orphaned from the returned state.
-    if (this.tracks.has(id)) this.removeTrack(id);
-
     const ctx = this.ensureContext();
     const buffer = await ctx.decodeAudioData(data);
     const gainNode = ctx.createGain();
@@ -205,6 +200,11 @@ export class AudioEngine {
     gainNode.gain.value = volume;
     gainNode.connect(muteGainNode);
     muteGainNode.connect(groupGain);
+    // Checked right before committing (not before the decode above) so that if two
+    // loads for the same slot overlap — e.g. a retry click racing the initial load —
+    // whichever resolves last still stops/disconnects whatever the other one left
+    // behind, even if that track had already started playing in the meantime.
+    if (this.tracks.has(id)) this.removeTrack(id);
     this.tracks.set(id, {
       name,
       buffer,
@@ -227,16 +227,15 @@ export class AudioEngine {
     data: ArrayBuffer,
     initialVolume = 1,
   ): Promise<void> {
-    // Same replace-in-place rule as loadTrack: re-assigning a slot stops
-    // whatever was previously triggered from it.
-    if (this.oneShots.has(id)) this.removeOneShotSlot(id);
-
     const ctx = this.ensureContext();
     const buffer = await ctx.decodeAudioData(data);
     const gainNode = ctx.createGain();
     const volume = Math.min(1, Math.max(0, initialVolume));
     gainNode.gain.value = volume;
     gainNode.connect(this.masterGain!);
+    // Same replace-in-place rule as loadTrack: checked right before committing so an
+    // overlapping load for the same slot can't silently orphan an already-triggered slot.
+    if (this.oneShots.has(id)) this.removeOneShotSlot(id);
     this.oneShots.set(id, {
       name,
       buffer,
@@ -322,12 +321,27 @@ export class AudioEngine {
     track.startedAt = ctx.currentTime - offset;
   }
 
-  /** Applies a linear or exponential ramp on a track's GainNode to `target` over `durationMs`. */
-  private rampGain(track: Track, target: number, durationMs: number, curve: FadeCurve): void {
+  /**
+   * Applies a linear or exponential ramp on a track's GainNode to `target`
+   * over `durationMs`, anchored at `startValue`.
+   *
+   * Callers that just scheduled the starting point must pass it explicitly:
+   * `gain.value` still reports the pre-automation value until the rendering
+   * thread catches up, so anchoring on it would pin the ramp to the old gain
+   * and silently flatten the fade.
+   */
+  private rampGain(
+    track: Track,
+    target: number,
+    durationMs: number,
+    curve: FadeCurve,
+    startValue?: number,
+  ): void {
     const ctx = this.ensureContext();
     const now = ctx.currentTime;
     const durationSec = Math.max(0, durationMs) / 1000;
     const gain = track.gainNode.gain;
+    const start = startValue ?? gain.value;
     gain.cancelScheduledValues(now);
 
     if (durationSec === 0) {
@@ -336,13 +350,12 @@ export class AudioEngine {
     }
 
     if (curve === "exponential") {
-      const start = Math.max(gain.value, MIN_GAIN);
-      gain.setValueAtTime(start, now);
+      gain.setValueAtTime(Math.max(start, MIN_GAIN), now);
       const end = Math.max(target, MIN_GAIN);
       gain.exponentialRampToValueAtTime(end, now + durationSec);
       if (target <= MIN_GAIN) gain.setValueAtTime(0, now + durationSec);
     } else {
-      gain.setValueAtTime(gain.value, now);
+      gain.setValueAtTime(start, now);
       gain.linearRampToValueAtTime(target, now + durationSec);
     }
   }
@@ -387,6 +400,53 @@ export class AudioEngine {
   }
 
   /**
+   * Current playback position in seconds: live from the AudioContext clock
+   * while playing, otherwise the offset a play()/fadeIn() would resume from.
+   * Deliberately not part of EngineState — it advances continuously, so
+   * callers poll it at whatever rate their UI needs instead of every
+   * listener re-rendering on each frame.
+   */
+  getPosition(id: string): number {
+    const track = this.tracks.get(id);
+    if (!track) return 0;
+    // Reads must not create or resume a context the way ensureContext() would.
+    if (!track.source || !this.audioContext) return track.offset;
+    const elapsed = Math.max(0, this.audioContext.currentTime - track.startedAt);
+    return track.loop ? elapsed % track.buffer.duration : Math.min(elapsed, track.buffer.duration);
+  }
+
+  /**
+   * Jumps to `positionSeconds`. A playing track gets its source swapped for
+   * one started at the new offset — gain, fades, mute and loop all carry over
+   * untouched, since those live on nodes the source merely feeds into.
+   */
+  seek(id: string, positionSeconds: number): void {
+    const track = this.getTrack(id);
+    const duration = track.buffer.duration;
+    let position = Math.min(Math.max(0, positionSeconds), duration);
+
+    if (position >= duration) {
+      // Landing exactly on the end wraps a looping track; for a one-shot play
+      // it means "finished", which stop() already models (source off, offset 0).
+      if (!track.loop) {
+        this.stop(id);
+        return;
+      }
+      position = 0;
+    }
+
+    track.offset = position;
+    if (track.source) {
+      const ctx = this.ensureContext();
+      track.source.onended = null;
+      track.source.stop();
+      track.source = null;
+      this.startSource(track, ctx);
+    }
+    this.notify();
+  }
+
+  /**
    * Starts (if stopped) or turns up (if already playing) a track, ramping
    * its gain up to `targetVolume` (default: the track's current volume)
    * over `durationMs`.
@@ -404,13 +464,15 @@ export class AudioEngine {
     this.clearFadeTimer(track);
     track.volume = target;
 
-    if (!track.source) {
+    const fromSilence = !track.source;
+    if (fromSilence) {
       track.gainNode.gain.cancelScheduledValues(ctx.currentTime);
       track.gainNode.gain.setValueAtTime(0, ctx.currentTime);
       this.startSource(track, ctx);
     }
 
-    this.rampGain(track, target, durationMs, curve);
+    // Starting from silence is the one case the gain node can't report yet, so say so.
+    this.rampGain(track, target, durationMs, curve, fromSilence ? 0 : undefined);
 
     if (durationMs > 0) {
       track.fadeTimer = setTimeout(() => {

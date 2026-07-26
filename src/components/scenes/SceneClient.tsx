@@ -14,7 +14,6 @@ import { LoopIcon, PauseIcon, PlayIcon, SpeakerOnIcon } from "@/components/ui/ic
 import { LAST_SCENE_COOKIE } from "@/lib/lastScene";
 import type {
   AudioFileWithMeta,
-  FadeSettings,
   MixPreset,
   MusicSlot,
   OneShotSlot,
@@ -25,6 +24,10 @@ const musicTrackId = (slotIndex: number) => `music-${slotIndex}`;
 const oneshotTrackId = (slotIndex: number) => `oneshot-${slotIndex}`;
 const MUSIC_COLUMN_SIZE = 5;
 const musicGroupId = (slotIndex: number) => (slotIndex <= MUSIC_COLUMN_SIZE ? "left" : "right");
+/** The only fade lengths on offer — deliberately two presets, not a free-form field. */
+const FADE_DURATIONS_MS = [3000, 5000];
+const FADE_BUTTON_CLASS =
+  "focus-ring rounded-md border border-border-strong px-2 py-1 text-xs text-muted-foreground transition enabled:hover:border-ember-400/60 enabled:hover:text-ember-300 disabled:cursor-not-allowed disabled:opacity-30";
 
 function replaceMusicSlot(scene: Scene, slot: MusicSlot): Scene {
   return {
@@ -86,6 +89,8 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     fadeIn,
     fadeOut,
     stop,
+    seek,
+    getPosition,
     crossfade,
     setVolume,
     setLoop,
@@ -418,22 +423,18 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     }
   }
 
+  // Fading is a master-level move only: every loaded music track ramps together,
+  // each up to its own volume, starting any that were stopped.
+  function fadeInAllMusic(durationMs: number) {
+    for (const track of Object.values(tracks)) {
+      fadeIn(track.id, durationMs);
+    }
+  }
+
   function fadeOutAllMusic(durationMs: number) {
     for (const track of Object.values(tracks)) {
       if (track.isPlaying) fadeOut(track.id, durationMs);
     }
-  }
-
-  function handleFadeSettingsChange(slotIndex: number, fade: FadeSettings) {
-    setScene((prev) =>
-      prev
-        ? replaceMusicSlot(prev, {
-            ...prev.musicSlots.find((s) => s.slotIndex === slotIndex)!,
-            fade,
-          })
-        : prev
-    );
-    schedulePersist(`music-fade-${slotIndex}`, () => void patchMusicSlot(slotIndex, { fade }));
   }
 
   function handleOneShotVolume(slotIndex: number, volume: number) {
@@ -741,24 +742,38 @@ export function SceneClient({ sceneId }: SceneClientProps) {
             </span>
           </div>
 
-          <div className="flex flex-none items-center gap-1.5">
-            <span className="font-mono text-xs text-muted-foreground">Fada ut allt</span>
-            <button
-              type="button"
-              onClick={() => fadeOutAllMusic(3000)}
-              disabled={!anyMusicPlaying}
-              className="focus-ring rounded-md border border-border-strong px-2 py-1 text-xs text-muted-foreground transition enabled:hover:border-ember-400/60 enabled:hover:text-ember-300 disabled:cursor-not-allowed disabled:opacity-30"
-            >
-              3s
-            </button>
-            <button
-              type="button"
-              onClick={() => fadeOutAllMusic(5000)}
-              disabled={!anyMusicPlaying}
-              className="focus-ring rounded-md border border-border-strong px-2 py-1 text-xs text-muted-foreground transition enabled:hover:border-ember-400/60 enabled:hover:text-ember-300 disabled:cursor-not-allowed disabled:opacity-30"
-            >
-              5s
-            </button>
+          <div className="flex flex-none flex-wrap items-center gap-x-4 gap-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-xs text-muted-foreground">Fada in allt</span>
+              {FADE_DURATIONS_MS.map((durationMs) => (
+                <button
+                  key={durationMs}
+                  type="button"
+                  onClick={() => fadeInAllMusic(durationMs)}
+                  disabled={loadedMusicTrackIds.length === 0}
+                  aria-label={`Fada in all musik på ${durationMs / 1000} sekunder`}
+                  className={FADE_BUTTON_CLASS}
+                >
+                  {durationMs / 1000}s
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-xs text-muted-foreground">Fada ut allt</span>
+              {FADE_DURATIONS_MS.map((durationMs) => (
+                <button
+                  key={durationMs}
+                  type="button"
+                  onClick={() => fadeOutAllMusic(durationMs)}
+                  disabled={!anyMusicPlaying}
+                  aria-label={`Fada ut all musik på ${durationMs / 1000} sekunder`}
+                  className={FADE_BUTTON_CLASS}
+                >
+                  {durationMs / 1000}s
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -818,13 +833,12 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                           void loadMusicAudio(slot.slotIndex, slot.audioFileId, slot.volume);
                       }}
                       onPlay={() => play(musicTrackId(slot.slotIndex))}
-                      onFadeIn={() => fadeIn(musicTrackId(slot.slotIndex), slot.fade.fadeInMs)}
-                      onFadeOut={() => fadeOut(musicTrackId(slot.slotIndex), slot.fade.fadeOutMs)}
                       onStop={() => stop(musicTrackId(slot.slotIndex))}
+                      onSeek={(position) => seek(musicTrackId(slot.slotIndex), position)}
+                      getPosition={getPosition}
                       onVolumeChange={(volume) => handleMusicVolume(slot.slotIndex, volume)}
                       onLoopChange={(loop) => handleMusicLoop(slot.slotIndex, loop)}
                       onMuteChange={(muted) => handleMusicMute(slot.slotIndex, muted)}
-                      onFadeSettingsChange={(fade) => handleFadeSettingsChange(slot.slotIndex, fade)}
                       onRename={(name) => handleMusicName(slot.slotIndex, name)}
                     />
                   ))}
