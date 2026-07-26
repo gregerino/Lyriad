@@ -34,10 +34,25 @@ föredrar det.
    pnpm db:migrate
    ```
    Detta behöver bara göras när schemat ändras (nya Drizzle-migrationer i
-   `drizzle/`), inte vid varje deploy.
+   `drizzle/`), inte vid varje deploy. `drizzle.config.ts` läser in
+   `.env.local` själv, så ingen extra miljövariabel behöver sättas i skalet.
 4. Vill du ha en isolerad dev-databas: skapa en **branch** av Neon-projektet
    (Neon stöder databas-branching) och peka din lokala `.env.local` mot den
    branchens anslutningssträng istället för produktionens.
+
+**Ordningen spelar roll för destruktiva migrationer.** Om `.env.local` pekar
+mot produktionsdatabasen (vilket den gör direkt efter `vercel env pull`, om du
+inte skapat en Neon-branch enligt punkt 4) delar din lokala dev-server och
+produktionen samma data. Drizzle genererar en explicit kolumnlista i sina
+`SELECT`, så en migration som droppar en kolumn får den **redan deployade**
+koden att krascha direkt — inte vid nästa deploy. Kör därför alltid i den här
+ordningen när en migration tar bort eller byter namn på något:
+
+1. Pusha och låt produktionsdeployen med den nya koden bli klar.
+2. Kör `pnpm db:migrate` först därefter.
+
+Migrationer som bara *lägger till* (nya tabeller, nullbara kolumner, defaults)
+är ofarliga i valfri ordning.
 
 ## 3. Miljövariabler i dashboarden
 
