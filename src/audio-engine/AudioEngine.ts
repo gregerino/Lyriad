@@ -34,7 +34,14 @@ export type EngineState = {
 
 type Track = {
   name: string;
-  buffer: AudioBuffer;
+  /**
+   * Music streams from a media element rather than a decoded AudioBuffer.
+   * decodeAudioData inflates a file to raw float PCM — a 74 MB, 65-minute
+   * track becomes ~1.4 GB in memory, which kills the tab outright on iPad.
+   * The element streams and seeks natively at a near-constant memory cost.
+   */
+  element: HTMLAudioElement;
+  sourceNode: MediaElementAudioSourceNode;
   gainNode: GainNode;
   /**
    * In series after gainNode, before the master bus. Mute is a pure on/off
@@ -43,15 +50,11 @@ type Track = {
    */
   muteGainNode: GainNode;
   muted: boolean;
-  source: AudioBufferSourceNode | null;
-  loop: boolean;
   /** Target volume (0-1) — what the slider shows, independent of the ramp in progress. */
   volume: number;
-  /** Playback offset (seconds) to resume from on next play()/fadeIn(). */
-  offset: number;
-  /** ctx.currentTime at which the current source started, adjusted for offset. */
-  startedAt: number;
   fadeTimer: ReturnType<typeof setTimeout> | null;
+  /** Set when the track owns an object URL (local File) and must revoke it. */
+  objectUrl: string | null;
 };
 
 type OneShotSlot = {
@@ -160,9 +163,10 @@ export class AudioEngine {
       tracks[id] = {
         id,
         name: track.name,
-        duration: track.buffer.duration,
-        isPlaying: track.source !== null,
-        loop: track.loop,
+        // NaN until the element has metadata; the UI treats 0 as "not known yet".
+        duration: Number.isFinite(track.element.duration) ? track.element.duration : 0,
+        isPlaying: !track.element.paused && !track.element.ended,
+        loop: track.element.loop,
         volume: track.volume,
         muted: track.muted,
         fading: track.fadeTimer !== null,
@@ -187,39 +191,78 @@ export class AudioEngine {
     return { tracks, oneShots, masterVolume: this.masterVolume, groups };
   }
 
+  /**
+   * Streams `url` into a music slot. Resolves once the element has metadata, so
+   * callers can surface a real failure (bad URL, blocked by CORS, unsupported
+   * codec) instead of leaving a silent slot behind.
+   */
   async loadTrack(
     id: string,
     name: string,
-    data: ArrayBuffer,
+    url: string,
     groupId: string,
     initialVolume = 1,
+    objectUrl: string | null = null,
   ): Promise<void> {
     const ctx = this.ensureContext();
-    const buffer = await ctx.decodeAudioData(data);
+    const element = new Audio();
+    // Required before the element may be routed through Web Audio; without it
+    // createMediaElementSource() yields silence for a cross-origin file.
+    element.crossOrigin = "anonymous";
+    element.preload = "auto";
+    element.src = url;
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onLoaded = () => {
+          cleanup();
+          resolve();
+        };
+        const onError = () => {
+          cleanup();
+          reject(new Error(element.error?.message ?? `Kunde inte ladda ${name}`));
+        };
+        const cleanup = () => {
+          element.removeEventListener("loadedmetadata", onLoaded);
+          element.removeEventListener("error", onError);
+        };
+        element.addEventListener("loadedmetadata", onLoaded);
+        element.addEventListener("error", onError);
+        element.load();
+      });
+    } catch (err) {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      throw err;
+    }
+
+    const sourceNode = ctx.createMediaElementSource(element);
     const gainNode = ctx.createGain();
     const muteGainNode = ctx.createGain();
     const groupGain = this.ensureGroup(groupId);
     const volume = Math.min(1, Math.max(0, initialVolume));
     gainNode.gain.value = volume;
+    sourceNode.connect(gainNode);
     gainNode.connect(muteGainNode);
     muteGainNode.connect(groupGain);
-    // Checked right before committing (not before the decode above) so that if two
+
+    // Keeps the UI honest about a track that reached its end on its own.
+    element.addEventListener("ended", () => this.notify());
+
+    // Checked right before committing (not before the await above) so that if two
     // loads for the same slot overlap — e.g. a retry click racing the initial load —
     // whichever resolves last still stops/disconnects whatever the other one left
     // behind, even if that track had already started playing in the meantime.
     if (this.tracks.has(id)) this.removeTrack(id);
     this.tracks.set(id, {
       name,
-      buffer,
+      element,
+      sourceNode,
       gainNode,
       muteGainNode,
       muted: false,
-      source: null,
-      loop: false,
       volume,
-      offset: 0,
-      startedAt: 0,
       fadeTimer: null,
+      objectUrl,
     });
     this.notify();
   }
@@ -308,22 +351,9 @@ export class AudioEngine {
     this.notify();
   }
 
-  private startSource(track: Track, ctx: AudioContext): void {
-    const source = ctx.createBufferSource();
-    source.buffer = track.buffer;
-    source.loop = track.loop;
-    source.connect(track.gainNode);
-    source.onended = () => {
-      if (track.source === source) {
-        track.source = null;
-        track.offset = 0;
-        this.notify();
-      }
-    };
-    const offset = track.offset % track.buffer.duration;
-    source.start(0, offset);
-    track.source = source;
-    track.startedAt = ctx.currentTime - offset;
+  /** Starts the element, tolerating the autoplay rejection browsers raise off-gesture. */
+  private startElement(track: Track): void {
+    void track.element.play().catch(() => this.notify());
   }
 
   /**
@@ -367,25 +397,22 @@ export class AudioEngine {
 
   play(id: string): void {
     const track = this.getTrack(id);
-    if (track.source) return;
+    if (!track.element.paused) return;
     this.clearFadeTimer(track);
     const ctx = this.ensureContext();
     track.gainNode.gain.cancelScheduledValues(ctx.currentTime);
     track.gainNode.gain.setValueAtTime(track.volume, ctx.currentTime);
-    this.startSource(track, ctx);
+    this.startElement(track);
     this.notify();
   }
 
   pause(id: string): void {
     const track = this.getTrack(id);
     this.clearFadeTimer(track);
-    if (!track.source) return;
+    if (track.element.paused) return;
     const ctx = this.ensureContext();
     track.gainNode.gain.cancelScheduledValues(ctx.currentTime);
-    track.offset = (ctx.currentTime - track.startedAt) % track.buffer.duration;
-    track.source.onended = null;
-    track.source.stop();
-    track.source = null;
+    track.element.pause();
     this.notify();
   }
 
@@ -395,59 +422,40 @@ export class AudioEngine {
     const ctx = this.ensureContext();
     track.gainNode.gain.cancelScheduledValues(ctx.currentTime);
     track.gainNode.gain.setValueAtTime(track.volume, ctx.currentTime);
-    if (track.source) {
-      track.source.onended = null;
-      track.source.stop();
-      track.source = null;
-    }
-    track.offset = 0;
+    track.element.pause();
+    track.element.currentTime = 0;
     this.notify();
   }
 
   /**
-   * Current playback position in seconds: live from the AudioContext clock
-   * while playing, otherwise the offset a play()/fadeIn() would resume from.
-   * Deliberately not part of EngineState — it advances continuously, so
-   * callers poll it at whatever rate their UI needs instead of every
-   * listener re-rendering on each frame.
+   * Current playback position in seconds. Deliberately not part of EngineState —
+   * it advances continuously, so callers poll it at whatever rate their UI needs
+   * instead of every listener re-rendering on each frame.
    */
   getPosition(id: string): number {
     const track = this.tracks.get(id);
     if (!track) return 0;
-    // Reads must not create or resume a context the way ensureContext() would.
-    if (!track.source || !this.audioContext) return track.offset;
-    const elapsed = Math.max(0, this.audioContext.currentTime - track.startedAt);
-    return track.loop ? elapsed % track.buffer.duration : Math.min(elapsed, track.buffer.duration);
+    return track.element.currentTime;
   }
 
-  /**
-   * Jumps to `positionSeconds`. A playing track gets its source swapped for
-   * one started at the new offset — gain, fades, mute and loop all carry over
-   * untouched, since those live on nodes the source merely feeds into.
-   */
+  /** Jumps to `positionSeconds`; gain, fades, mute and loop are unaffected. */
   seek(id: string, positionSeconds: number): void {
     const track = this.getTrack(id);
-    const duration = track.buffer.duration;
+    const duration = track.element.duration;
+    if (!Number.isFinite(duration)) return;
     let position = Math.min(Math.max(0, positionSeconds), duration);
 
     if (position >= duration) {
       // Landing exactly on the end wraps a looping track; for a one-shot play
-      // it means "finished", which stop() already models (source off, offset 0).
-      if (!track.loop) {
+      // it means "finished", which stop() already models.
+      if (!track.element.loop) {
         this.stop(id);
         return;
       }
       position = 0;
     }
 
-    track.offset = position;
-    if (track.source) {
-      const ctx = this.ensureContext();
-      track.source.onended = null;
-      track.source.stop();
-      track.source = null;
-      this.startSource(track, ctx);
-    }
+    track.element.currentTime = position;
     this.notify();
   }
 
@@ -469,11 +477,11 @@ export class AudioEngine {
     this.clearFadeTimer(track);
     track.volume = target;
 
-    const fromSilence = !track.source;
+    const fromSilence = track.element.paused;
     if (fromSilence) {
       track.gainNode.gain.cancelScheduledValues(ctx.currentTime);
       track.gainNode.gain.setValueAtTime(0, ctx.currentTime);
-      this.startSource(track, ctx);
+      this.startElement(track);
     }
 
     // Starting from silence is the one case the gain node can't report yet, so say so.
@@ -498,7 +506,7 @@ export class AudioEngine {
     options: { curve?: FadeCurve; then?: "stop" | "pause" | "none" } = {},
   ): void {
     const track = this.getTrack(id);
-    if (!track.source) return;
+    if (track.element.paused) return;
     const curve = options.curve ?? "linear";
     const settle = options.then ?? "stop";
 
@@ -541,8 +549,7 @@ export class AudioEngine {
 
   setLoop(id: string, loop: boolean): void {
     const track = this.getTrack(id);
-    track.loop = loop;
-    if (track.source) track.source.loop = loop;
+    track.element.loop = loop;
     this.notify();
   }
 
@@ -588,12 +595,14 @@ export class AudioEngine {
     const track = this.tracks.get(id);
     if (!track) return;
     this.clearFadeTimer(track);
-    if (track.source) {
-      track.source.onended = null;
-      track.source.stop();
-    }
+    track.element.pause();
+    track.sourceNode.disconnect();
     track.gainNode.disconnect();
     track.muteGainNode.disconnect();
+    // Dropping the src lets the browser release the buffered stream straight away.
+    track.element.removeAttribute("src");
+    track.element.load();
+    if (track.objectUrl) URL.revokeObjectURL(track.objectUrl);
     this.tracks.delete(id);
     this.notify();
   }

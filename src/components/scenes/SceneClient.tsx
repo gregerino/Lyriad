@@ -408,6 +408,20 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     setMuted(musicTrackId(slotIndex), muted);
   }
 
+  // The ticked fade length is a property of the scene, not of one button — every
+  // way of starting or stopping music honours it, master row and slot alike.
+  function startMusic(slotIndex: number) {
+    const trackId = musicTrackId(slotIndex);
+    if (fadeDurationMs) fadeIn(trackId, fadeDurationMs);
+    else play(trackId);
+  }
+
+  function stopMusic(slotIndex: number) {
+    const trackId = musicTrackId(slotIndex);
+    if (fadeDurationMs) fadeOut(trackId, fadeDurationMs, { then: "stop" });
+    else stop(trackId);
+  }
+
   function toggleMasterPlayback() {
     const loaded = scene?.musicSlots.filter(
       (s) => musicLoadState[s.slotIndex]?.status === "loaded"
@@ -622,8 +636,8 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                   if (slot.audioFileId)
                     void loadMusicAudio(slot.slotIndex, slot.audioFileId, slot.volume);
                 }}
-                onPlay={() => play(musicTrackId(slot.slotIndex))}
-                onStop={() => stop(musicTrackId(slot.slotIndex))}
+                onPlay={() => startMusic(slot.slotIndex)}
+                onStop={() => stopMusic(slot.slotIndex)}
                 onSeek={(position) => seek(musicTrackId(slot.slotIndex), position)}
                 getPosition={getPosition}
                 onVolumeChange={(volume) => handleMusicVolume(slot.slotIndex, volume)}
@@ -710,12 +724,46 @@ export function SceneClient({ sceneId }: SceneClientProps) {
         )}
       </div>
 
-      {/* Three columns from tablet width up (iPad portrait is 768–834px), with the
-          centre column giving ground first so the two slot columns stay usable. */}
-      <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,12rem)_minmax(0,1fr)] lg:gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,16rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,20rem)_minmax(0,1fr)]">
+      {/* Below the artwork breakpoint the master controls need a home of their own,
+          since the centre column (and its orb) only exists from lg up. */}
+      <div className="mt-5 flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2 lg:hidden">
+        <button
+          type="button"
+          onClick={toggleMasterPlayback}
+          disabled={loadedMusicTrackIds.length === 0}
+          aria-label={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
+          title={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
+          className="focus-ring flex h-10 w-10 flex-none items-center justify-center rounded-full bg-gradient-to-b from-ember-400 to-ember-500 text-ink-950 shadow-glow-sm transition hover:shadow-glow disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
+        >
+          {anyMusicPlaying ? (
+            <PauseIcon className="h-4 w-4" />
+          ) : (
+            <PlayIcon className="h-4 w-4 translate-x-0.5" />
+          )}
+        </button>
+        <span className="flex-none text-xs text-muted-foreground">
+          {loadedMusicTrackIds.length === 0
+            ? "Inga spår laddade"
+            : anyMusicPlaying
+              ? "Spelar"
+              : "Pausad"}
+        </span>
+        <SpeakerOnIcon className="ml-auto h-3.5 w-3.5 flex-none text-muted-foreground" />
+        <Slider
+          value={masterVolume}
+          onChange={setMasterVolume}
+          className="w-full max-w-[14rem]"
+          aria-label="Mastervolym"
+        />
+      </div>
+
+      {/* Two slot columns from tablet width up (iPad portrait is 768–834px). The
+          centre column is desktop-only: on a tablet that width is worth more to
+          the slots than to the artwork. */}
+      <div className="mt-4 grid gap-4 md:grid-cols-2 lg:gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,16rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,20rem)_minmax(0,1fr)]">
         {renderMusicColumn(musicColumns[0])}
 
-        <div className="order-first flex flex-col items-center gap-4 md:order-none">
+        <div className="hidden flex-col items-center gap-4 lg:flex">
           <div className="flex w-full items-center gap-2 px-1">
             <SpeakerOnIcon className="h-3.5 w-3.5 flex-none text-muted-foreground" />
             <Slider

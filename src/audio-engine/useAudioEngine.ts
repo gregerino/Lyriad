@@ -19,18 +19,16 @@ export function useAudioEngine() {
 
   const loadTrack = useCallback(
     async (id: string, file: File, groupId: string, initialVolume?: number) => {
-      const data = await file.arrayBuffer();
-      await engine.loadTrack(id, file.name, data, groupId, initialVolume);
+      // Music streams from an object URL rather than being read into memory.
+      const objectUrl = URL.createObjectURL(file);
+      await engine.loadTrack(id, file.name, objectUrl, groupId, initialVolume, objectUrl);
     },
     [engine],
   );
 
   const loadTrackFromUrl = useCallback(
     async (id: string, name: string, url: string, groupId: string, initialVolume?: number) => {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Kunde inte hämta ljudfilen (${res.status})`);
-      const data = await res.arrayBuffer();
-      await engine.loadTrack(id, name, data, groupId, initialVolume);
+      await engine.loadTrack(id, name, url, groupId, initialVolume);
     },
     [engine],
   );
