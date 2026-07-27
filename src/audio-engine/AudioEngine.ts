@@ -68,6 +68,9 @@ type Listener = (state: EngineState) => void;
 /** exponentialRampToValueAtTime rejects a target/start of exactly 0. */
 const MIN_GAIN = 0.0001;
 
+/** Bus every one-shot slot routes through, so they share one fader. */
+export const ONESHOT_GROUP_ID = "oneshots";
+
 /**
  * Framework-agnostic Web Audio playback engine. Owns the AudioContext, one
  * GainNode per track for independent volume control plus a master GainNode
@@ -232,7 +235,9 @@ export class AudioEngine {
     const gainNode = ctx.createGain();
     const volume = Math.min(1, Math.max(0, initialVolume));
     gainNode.gain.value = volume;
-    gainNode.connect(this.masterGain!);
+    // Routed through a shared bus rather than straight to master, so one-shots
+    // can be faded as a group independently of the music columns.
+    gainNode.connect(this.ensureGroup(ONESHOT_GROUP_ID));
     // Same replace-in-place rule as loadTrack: checked right before committing so an
     // overlapping load for the same slot can't silently orphan an already-triggered slot.
     if (this.oneShots.has(id)) this.removeOneShotSlot(id);
@@ -487,22 +492,26 @@ export class AudioEngine {
    * Ramps a track's gain down to silence over `durationMs`, then stops it
    * (pass `stop: false` to leave the source running silently instead).
    */
-  fadeOut(id: string, durationMs: number, options: { curve?: FadeCurve; stop?: boolean } = {}): void {
+  fadeOut(
+    id: string,
+    durationMs: number,
+    options: { curve?: FadeCurve; then?: "stop" | "pause" | "none" } = {},
+  ): void {
     const track = this.getTrack(id);
     if (!track.source) return;
     const curve = options.curve ?? "linear";
-    const shouldStop = options.stop ?? true;
+    const settle = options.then ?? "stop";
 
     this.clearFadeTimer(track);
     this.rampGain(track, 0, durationMs, curve);
 
     track.fadeTimer = setTimeout(() => {
       track.fadeTimer = null;
-      if (shouldStop) {
-        this.stop(id);
-      } else {
-        this.notify();
-      }
+      // "pause" keeps the playhead where the fade left it, so a later fade in
+      // resumes rather than restarts — what a master play/pause toggle implies.
+      if (settle === "stop") this.stop(id);
+      else if (settle === "pause") this.pause(id);
+      else this.notify();
     }, durationMs);
     this.notify();
   }

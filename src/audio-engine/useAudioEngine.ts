@@ -54,8 +54,11 @@ export function useAudioEngine() {
     [engine],
   );
   const fadeOut = useCallback(
-    (id: string, durationMs: number, options?: { curve?: FadeCurve; stop?: boolean }) =>
-      engine.fadeOut(id, durationMs, options),
+    (
+      id: string,
+      durationMs: number,
+      options?: { curve?: FadeCurve; then?: "stop" | "pause" | "none" },
+    ) => engine.fadeOut(id, durationMs, options),
     [engine],
   );
   const crossfade = useCallback(

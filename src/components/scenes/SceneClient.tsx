@@ -2,15 +2,25 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useAudioEngine } from "@/audio-engine";
-import type { FadeCurve } from "@/audio-engine";
+import { ONESHOT_GROUP_ID, useAudioEngine } from "@/audio-engine";
 import { AudioUploader } from "@/components/audio/AudioUploader";
-import { FavoriteScenesBar } from "@/components/scenes/FavoriteScenesBar";
-import { MusicSlotRow } from "@/components/slots/MusicSlotRow";
+import { MixerMenu } from "@/components/scenes/MixerMenu";
+import { SceneArtwork } from "@/components/scenes/SceneArtwork";
+import { SceneTabs } from "@/components/scenes/SceneTabs";
+import { MusicSlotCard } from "@/components/slots/MusicSlotCard";
 import { OneShotPad } from "@/components/slots/OneShotPad";
 import type { SlotLoadState } from "@/components/slots/types";
+import { Popover } from "@/components/ui/Popover";
 import { Slider } from "@/components/ui/Slider";
-import { LoopIcon, PauseIcon, PlayIcon, SpeakerOnIcon } from "@/components/ui/icons";
+import {
+  ChevronDownIcon,
+  LibraryIcon,
+  LoopIcon,
+  PauseIcon,
+  PlayIcon,
+  SpeakerOnIcon,
+  UploadIcon,
+} from "@/components/ui/icons";
 import { LAST_SCENE_COOKIE } from "@/lib/lastScene";
 import type {
   AudioFileWithMeta,
@@ -26,8 +36,6 @@ const MUSIC_COLUMN_SIZE = 5;
 const musicGroupId = (slotIndex: number) => (slotIndex <= MUSIC_COLUMN_SIZE ? "left" : "right");
 /** The only fade lengths on offer — deliberately two presets, not a free-form field. */
 const FADE_DURATIONS_MS = [3000, 5000];
-const FADE_BUTTON_CLASS =
-  "focus-ring rounded-md border border-border-strong px-2 py-1 text-xs text-muted-foreground transition enabled:hover:border-ember-400/60 enabled:hover:text-ember-300 disabled:cursor-not-allowed disabled:opacity-30";
 
 function replaceMusicSlot(scene: Scene, slot: MusicSlot): Scene {
   return {
@@ -59,18 +67,11 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   const [musicSlotErrors, setMusicSlotErrors] = useState<Record<number, string | null>>({});
   const [oneshotSlotErrors, setOneshotSlotErrors] = useState<Record<number, string | null>>({});
 
-  const [uploaderOpen, setUploaderOpen] = useState(false);
-
-  const [crossfadeFrom, setCrossfadeFrom] = useState(1);
-  const [crossfadeTo, setCrossfadeTo] = useState(2);
-  const [crossfadeMs, setCrossfadeMs] = useState(3000);
-  const [crossfadeCurve, setCrossfadeCurve] = useState<FadeCurve>("linear");
+  const [collapsedColumns, setCollapsedColumns] = useState<Record<string, boolean>>({});
+  /** Ticked fade length, applied to both directions of master play/pause. */
+  const [fadeDurationMs, setFadeDurationMs] = useState<number | null>(null);
 
   const [mixPresets, setMixPresets] = useState<MixPreset[]>([]);
-  const [savingPreset, setSavingPreset] = useState(false);
-  const [presetName, setPresetName] = useState("");
-  const [presetSubmitting, setPresetSubmitting] = useState(false);
-  const [presetError, setPresetError] = useState<string | null>(null);
   const [deletingPresetId, setDeletingPresetId] = useState<string | null>(null);
 
   const loadedMusicRef = useRef<Record<number, string>>({});
@@ -416,24 +417,16 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     for (const s of loaded) {
       const trackId = musicTrackId(s.slotIndex);
       if (anyPlaying) {
-        if (tracks[trackId]?.isPlaying) pause(trackId);
+        if (!tracks[trackId]?.isPlaying) continue;
+        // Fading settles on pause, not stop, so the playhead survives — pressing
+        // play again picks up where the fade left off, same as an instant pause.
+        if (fadeDurationMs) fadeOut(trackId, fadeDurationMs, { then: "pause" });
+        else pause(trackId);
+      } else if (fadeDurationMs) {
+        fadeIn(trackId, fadeDurationMs);
       } else {
         play(trackId);
       }
-    }
-  }
-
-  // Fading is a master-level move only: every loaded music track ramps together,
-  // each up to its own volume, starting any that were stopped.
-  function fadeInAllMusic(durationMs: number) {
-    for (const track of Object.values(tracks)) {
-      fadeIn(track.id, durationMs);
-    }
-  }
-
-  function fadeOutAllMusic(durationMs: number) {
-    for (const track of Object.values(tracks)) {
-      if (track.isPlaying) fadeOut(track.id, durationMs);
     }
   }
 
@@ -463,11 +456,10 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     }
   }
 
-  async function saveMixPreset() {
-    const trimmedName = presetName.trim();
-    if (!trimmedName || !scene) return;
-    setPresetSubmitting(true);
-    setPresetError(null);
+  /** Resolves to an error message for the caller to show, or null on success. */
+  async function saveMixPreset(name: string): Promise<string | null> {
+    const trimmedName = name.trim();
+    if (!trimmedName || !scene) return "Mixen behöver ett namn";
     try {
       const groupVolumes = Object.fromEntries(
         musicColumns.map((column) => [column.id, groups[column.id]?.volume ?? 1])
@@ -491,12 +483,9 @@ export function SceneClient({ sceneId }: SceneClientProps) {
       }
       const { preset } = await res.json();
       setMixPresets((prev) => [...prev, preset]);
-      setSavingPreset(false);
-      setPresetName("");
+      return null;
     } catch (err) {
-      setPresetError(err instanceof Error ? err.message : "Kunde inte spara mixen");
-    } finally {
-      setPresetSubmitting(false);
+      return err instanceof Error ? err.message : "Kunde inte spara mixen";
     }
   }
 
@@ -556,7 +545,6 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   const anyMusicPlaying = loadedMusicTrackIds.some(
     (s) => tracks[musicTrackId(s.slotIndex)]?.isPlaying
   );
-  const filledMusicCount = scene.musicSlots.filter((s) => s.audioFileId).length;
   const filledOneShotCount = scene.oneShotSlots.filter((s) => s.audioFileId).length;
   const musicColumns = [
     {
@@ -567,159 +555,194 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     { id: "right", label: "Högerkolumnen", slots: scene.musicSlots.slice(MUSIC_COLUMN_SIZE) },
   ];
 
-  return (
-    <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-8 px-4 py-8 sm:px-6 sm:py-12">
-      <div>
-        <Link href="/scenes" className="focus-ring rounded-sm text-xs text-muted-foreground hover:text-parchment-200">
-          ← Alla scener
-        </Link>
-        <h1 className="mt-1 font-display text-2xl font-medium tracking-wide text-parchment-100 sm:text-3xl">
-          {scene.name}
-        </h1>
-        {scene.description && (
-          <p className="mt-1 text-sm text-muted-foreground">{scene.description}</p>
+  function renderMusicColumn(column: { id: string; label: string; slots: MusicSlot[] }) {
+    const allLooping = column.slots.length > 0 && column.slots.every((s) => s.loop);
+    const busVolume = groups[column.id]?.volume ?? 1;
+    const isCollapsed = collapsedColumns[column.id] ?? false;
+
+    return (
+      <div key={column.id} className="flex min-w-0 flex-col gap-3">
+        <div className="flex items-center gap-2 px-1">
+          <SpeakerOnIcon className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+          <Slider
+            value={busVolume}
+            onChange={(v) => setGroupVolume(column.id, v)}
+            className="w-full"
+            aria-label={`Bussvolym för ${column.label.toLowerCase()}`}
+          />
+          <button
+            type="button"
+            onClick={() => toggleColumnLoop(column.slots.map((s) => s.slotIndex))}
+            aria-pressed={allLooping}
+            aria-label={
+              allLooping
+                ? `Stäng av loop för ${column.label.toLowerCase()}`
+                : `Loopa ${column.label.toLowerCase()}`
+            }
+            className={`focus-ring flex h-7 w-7 flex-none items-center justify-center rounded-md transition ${
+              allLooping
+                ? "text-ember-300"
+                : "text-muted-foreground hover:text-ember-300"
+            }`}
+          >
+            <LoopIcon className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setCollapsedColumns((prev) => ({ ...prev, [column.id]: !isCollapsed }))
+            }
+            aria-expanded={!isCollapsed}
+            aria-label={
+              isCollapsed
+                ? `Visa ${column.label.toLowerCase()}`
+                : `Dölj ${column.label.toLowerCase()}`
+            }
+            className="focus-ring flex h-7 w-7 flex-none items-center justify-center rounded-md text-muted-foreground transition hover:text-parchment-100"
+          >
+            <ChevronDownIcon className={`h-4 w-4 transition ${isCollapsed ? "" : "rotate-180"}`} />
+          </button>
+        </div>
+
+        {!isCollapsed && (
+          <div className="flex flex-col gap-3">
+            {column.slots.map((slot) => (
+              <MusicSlotCard
+                key={slot.slotIndex}
+                slot={slot}
+                file={slot.audioFileId ? (audioFilesById.get(slot.audioFileId) ?? null) : null}
+                libraryFiles={musicLibraryFiles}
+                track={tracks[musicTrackId(slot.slotIndex)]}
+                loadState={musicLoadState[slot.slotIndex] ?? { status: "idle" }}
+                assigning={musicAssigning[slot.slotIndex] ?? false}
+                assignError={musicSlotErrors[slot.slotIndex] ?? null}
+                onAssign={(audioFileId) => void assignMusicSlot(slot.slotIndex, audioFileId)}
+                onClear={() => void clearMusicSlot(slot.slotIndex)}
+                onRetry={() => {
+                  if (slot.audioFileId)
+                    void loadMusicAudio(slot.slotIndex, slot.audioFileId, slot.volume);
+                }}
+                onPlay={() => play(musicTrackId(slot.slotIndex))}
+                onStop={() => stop(musicTrackId(slot.slotIndex))}
+                onSeek={(position) => seek(musicTrackId(slot.slotIndex), position)}
+                getPosition={getPosition}
+                onVolumeChange={(volume) => handleMusicVolume(slot.slotIndex, volume)}
+                onLoopChange={(loop) => handleMusicLoop(slot.slotIndex, loop)}
+                onMuteChange={(muted) => handleMusicMute(slot.slotIndex, muted)}
+                onRename={(name) => handleMusicName(slot.slotIndex, name)}
+              />
+            ))}
+          </div>
         )}
       </div>
+    );
+  }
 
-      <FavoriteScenesBar currentSceneId={scene.id} />
+  const oneShotBusVolume = groups[ONESHOT_GROUP_ID]?.volume ?? 1;
 
-      {filledMusicCount === 0 && filledOneShotCount === 0 && (
-        <p className="rounded-lg border border-dashed border-border-strong/70 bg-surface/50 px-4 py-3 text-sm text-muted-foreground">
-          Den här scenen har inga ljud än — ladda upp ovan eller tilldela filer i platserna nedan.
-        </p>
-      )}
+  return (
+    <div className="mx-auto flex min-h-screen w-full max-w-[100rem] flex-col px-4 py-4 sm:px-6">
+      <header className="flex items-center gap-3">
+        <SceneTabs currentSceneId={scene.id} currentSceneName={scene.name} />
 
-      <section className="rounded-lg border border-border bg-surface p-4 shadow-xs">
-        <button
-          type="button"
-          onClick={() => setUploaderOpen((open) => !open)}
-          aria-expanded={uploaderOpen}
-          className="focus-ring flex w-full items-center justify-between rounded-md text-left"
-        >
-          <span className="font-display text-lg font-medium tracking-wide text-parchment-100">
-            Ladda upp ljud
-          </span>
-          <span className="text-xs text-muted-foreground">{uploaderOpen ? "Dölj" : "Visa"}</span>
-        </button>
-        {uploaderOpen && (
-          <div className="mt-3">
+        <div className="flex flex-none items-center gap-2">
+          <Link
+            href="/library"
+            aria-label="Ljudbibliotek"
+            title="Ljudbibliotek"
+            className="focus-ring flex h-9 w-9 items-center justify-center rounded-lg border border-border-strong text-muted-foreground transition hover:border-ember-400/40 hover:text-ember-300"
+          >
+            <LibraryIcon className="h-4 w-4" />
+          </Link>
+
+          <Popover
+            panelClassName="w-80 max-w-[calc(100vw-2rem)]"
+            trigger={({ open, toggle }) => (
+              <button
+                type="button"
+                onClick={toggle}
+                aria-expanded={open}
+                aria-label="Ladda upp ljud"
+                title="Ladda upp ljud"
+                className={`focus-ring flex h-9 w-9 items-center justify-center rounded-lg border transition ${
+                  open
+                    ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
+                    : "border-border-strong text-muted-foreground hover:border-ember-400/40 hover:text-ember-300"
+                }`}
+              >
+                <UploadIcon className="h-4 w-4" />
+              </button>
+            )}
+          >
             <AudioUploader
               sceneId={sceneId}
               onUploaded={() => void fetchAll()}
               onAssigned={() => void fetchAll()}
             />
-          </div>
-        )}
-      </section>
+          </Popover>
 
-      <section>
-        <div className="flex items-center justify-between">
-          <h2 className="font-display text-xl font-medium tracking-wide text-parchment-100">
-            Musik
-          </h2>
-          <span className="font-mono text-xs text-muted-foreground">
-            {filledMusicCount}/{scene.musicSlots.length} platser
-          </span>
+          <MixerMenu
+            fadeDurationsMs={FADE_DURATIONS_MS}
+            fadeDurationMs={fadeDurationMs}
+            onFadeDurationChange={setFadeDurationMs}
+            presets={mixPresets}
+            onApplyPreset={applyMixPreset}
+            onDeletePreset={(presetId) => void deleteMixPreset(presetId)}
+            deletingPresetId={deletingPresetId}
+            onSavePreset={saveMixPreset}
+            crossfadeOptions={loadedMusicTrackIds.map((s) => ({
+              slotIndex: s.slotIndex,
+              label: s.name ?? `Musikplats ${s.slotIndex}`,
+            }))}
+            onCrossfade={(from, to, durationMs, curve) =>
+              crossfade(musicTrackId(from), musicTrackId(to), durationMs, { curve })
+            }
+          />
         </div>
+      </header>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="flex-none font-mono text-xs uppercase tracking-[0.15em] text-muted-foreground">
-            Snabbmix
-          </span>
-          {mixPresets.map((preset) => (
-            <span
-              key={preset.id}
-              className="inline-flex items-center gap-1 rounded-full border border-border-strong bg-surface pl-3 pr-1.5 py-1 text-xs text-parchment-200 transition hover:border-ember-400/50"
-            >
-              <button
-                type="button"
-                onClick={() => applyMixPreset(preset)}
-                className="focus-ring rounded-sm font-medium hover:text-ember-300"
-                title={`Applicera "${preset.name}"`}
-              >
-                {preset.name}
-              </button>
-              <button
-                type="button"
-                onClick={() => void deleteMixPreset(preset.id)}
-                disabled={deletingPresetId === preset.id}
-                aria-label={`Ta bort snabbmix ${preset.name}`}
-                title="Ta bort snabbmix"
-                className="focus-ring flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground/80 transition hover:text-danger-foreground disabled:opacity-40"
-              >
-                ×
-              </button>
-            </span>
-          ))}
-          {savingPreset ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-ember-400/40 bg-surface py-1 pl-3 pr-1.5">
-              <input
-                type="text"
-                autoFocus
-                value={presetName}
-                onChange={(e) => setPresetName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void saveMixPreset();
-                  if (e.key === "Escape") {
-                    setSavingPreset(false);
-                    setPresetName("");
-                    setPresetError(null);
-                  }
-                }}
-                placeholder="Namn på mixen"
-                className="focus-ring w-32 rounded-sm bg-transparent text-xs text-parchment-100 placeholder:text-muted-foreground"
-              />
-              <button
-                type="button"
-                onClick={() => void saveMixPreset()}
-                disabled={!presetName.trim() || presetSubmitting}
-                className="focus-ring rounded-sm text-xs font-medium text-ember-400 hover:text-ember-300 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {presetSubmitting ? "Sparar…" : "Spara"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSavingPreset(false);
-                  setPresetName("");
-                  setPresetError(null);
-                }}
-                className="focus-ring flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground/80 hover:text-parchment-100"
-                aria-label="Avbryt"
-              >
-                ×
-              </button>
-            </span>
-          ) : (
+      <div className="mt-6 text-center">
+        <h1 className="font-display text-xl font-medium tracking-wide text-parchment-100 sm:text-2xl">
+          {scene.name}
+        </h1>
+        {scene.description && (
+          <p className="mt-1 text-xs text-muted-foreground">{scene.description}</p>
+        )}
+      </div>
+
+      {/* Three columns from tablet width up (iPad portrait is 768–834px), with the
+          centre column giving ground first so the two slot columns stay usable. */}
+      <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,12rem)_minmax(0,1fr)] lg:gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,16rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,20rem)_minmax(0,1fr)]">
+        {renderMusicColumn(musicColumns[0])}
+
+        <div className="order-first flex flex-col items-center gap-4 md:order-none">
+          <div className="flex w-full items-center gap-2 px-1">
+            <SpeakerOnIcon className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+            <Slider
+              value={masterVolume}
+              onChange={setMasterVolume}
+              className="w-full"
+              aria-label="Mastervolym"
+            />
+          </div>
+
+          <SceneArtwork sceneId={scene.id} active={anyMusicPlaying} className="max-w-[18rem]" />
+
+          <div className="flex flex-col items-center gap-2">
             <button
               type="button"
-              onClick={() => setSavingPreset(true)}
-              className="focus-ring rounded-full border border-dashed border-border-strong px-3 py-1 text-xs text-muted-foreground transition hover:border-ember-400/50 hover:text-ember-300"
+              onClick={toggleMasterPlayback}
+              disabled={loadedMusicTrackIds.length === 0}
+              aria-label={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
+              title={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
+              className="focus-ring flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-b from-ember-400 to-ember-500 text-ink-950 shadow-glow-sm transition hover:shadow-glow disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
             >
-              + Spara mix
+              {anyMusicPlaying ? (
+                <PauseIcon className="h-5 w-5" />
+              ) : (
+                <PlayIcon className="h-5 w-5 translate-x-0.5" />
+              )}
             </button>
-          )}
-          {presetError && <p className="w-full text-xs text-danger-foreground">{presetError}</p>}
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-4 rounded-lg border border-ember-500/25 bg-gradient-to-r from-ember-950/50 to-surface p-4 shadow-sm">
-          <button
-            type="button"
-            onClick={toggleMasterPlayback}
-            disabled={loadedMusicTrackIds.length === 0}
-            aria-label={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
-            title={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
-            className="focus-ring flex h-12 w-12 flex-none items-center justify-center rounded-full bg-gradient-to-b from-ember-400 to-ember-500 text-ink-950 shadow-glow-sm transition hover:shadow-glow disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
-          >
-            {anyMusicPlaying ? (
-              <PauseIcon className="h-5 w-5" />
-            ) : (
-              <PlayIcon className="h-5 w-5 translate-x-0.5" />
-            )}
-          </button>
-
-          <div className="min-w-max flex-none">
-            <p className="text-sm font-medium text-parchment-100">Master</p>
             <p className="text-xs text-muted-foreground">
               {loadedMusicTrackIds.length === 0
                 ? "Inga spår laddade"
@@ -728,200 +751,69 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                   : "Pausad"}
             </p>
           </div>
-
-          <div className="flex flex-1 items-center gap-3 sm:max-w-xs">
-            <SpeakerOnIcon className="h-4 w-4 flex-none text-muted-foreground" />
-            <Slider
-              value={masterVolume}
-              onChange={setMasterVolume}
-              className="w-full"
-              aria-label="Mastervolym"
-            />
-            <span className="w-10 flex-none text-right font-mono text-xs text-muted-foreground">
-              {Math.round(masterVolume * 100)}%
-            </span>
-          </div>
-
-          <div className="flex flex-none flex-wrap items-center gap-x-4 gap-y-1.5">
-            <div className="flex items-center gap-1.5">
-              <span className="font-mono text-xs text-muted-foreground">Fada in allt</span>
-              {FADE_DURATIONS_MS.map((durationMs) => (
-                <button
-                  key={durationMs}
-                  type="button"
-                  onClick={() => fadeInAllMusic(durationMs)}
-                  disabled={loadedMusicTrackIds.length === 0}
-                  aria-label={`Fada in all musik på ${durationMs / 1000} sekunder`}
-                  className={FADE_BUTTON_CLASS}
-                >
-                  {durationMs / 1000}s
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <span className="font-mono text-xs text-muted-foreground">Fada ut allt</span>
-              {FADE_DURATIONS_MS.map((durationMs) => (
-                <button
-                  key={durationMs}
-                  type="button"
-                  onClick={() => fadeOutAllMusic(durationMs)}
-                  disabled={!anyMusicPlaying}
-                  aria-label={`Fada ut all musik på ${durationMs / 1000} sekunder`}
-                  className={FADE_BUTTON_CLASS}
-                >
-                  {durationMs / 1000}s
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {musicColumns.map((column) => {
-            const allLooping =
-              column.slots.length > 0 && column.slots.every((s) => s.loop);
-            const busVolume = groups[column.id]?.volume ?? 1;
-            return (
-              <div key={column.id} className="flex flex-col gap-3">
-                <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2 shadow-xs">
-                  <SpeakerOnIcon className="h-4 w-4 flex-none text-muted-foreground" />
-                  <Slider
-                    value={busVolume}
-                    onChange={(v) => setGroupVolume(column.id, v)}
-                    className="w-full"
-                    aria-label={`Bussvolym för ${column.label.toLowerCase()}`}
-                  />
-                  <span className="w-9 flex-none text-right font-mono text-xs text-muted-foreground">
-                    {Math.round(busVolume * 100)}%
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => toggleColumnLoop(column.slots.map((s) => s.slotIndex))}
-                    aria-pressed={allLooping}
-                    aria-label={
-                      allLooping
-                        ? `Stäng av loop för ${column.label.toLowerCase()}`
-                        : `Loopa ${column.label.toLowerCase()}`
-                    }
-                    title="Loopa alla i kolumnen"
-                    className={`focus-ring flex h-8 w-8 flex-none items-center justify-center rounded-md border transition ${
-                      allLooping
-                        ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
-                        : "border-border-strong text-muted-foreground hover:border-ember-400/40 hover:text-ember-300"
-                    }`}
-                  >
-                    <LoopIcon className="h-4 w-4" />
-                  </button>
-                </div>
+        {renderMusicColumn(musicColumns[1])}
+      </div>
 
-                <div className="flex flex-col gap-3">
-                  {column.slots.map((slot) => (
-                    <MusicSlotRow
-                      key={slot.slotIndex}
-                      slot={slot}
-                      file={slot.audioFileId ? (audioFilesById.get(slot.audioFileId) ?? null) : null}
-                      libraryFiles={musicLibraryFiles}
-                      track={tracks[musicTrackId(slot.slotIndex)]}
-                      loadState={musicLoadState[slot.slotIndex] ?? { status: "idle" }}
-                      assigning={musicAssigning[slot.slotIndex] ?? false}
-                      assignError={musicSlotErrors[slot.slotIndex] ?? null}
-                      onAssign={(audioFileId) => void assignMusicSlot(slot.slotIndex, audioFileId)}
-                      onClear={() => void clearMusicSlot(slot.slotIndex)}
-                      onRetry={() => {
-                        if (slot.audioFileId)
-                          void loadMusicAudio(slot.slotIndex, slot.audioFileId, slot.volume);
-                      }}
-                      onPlay={() => play(musicTrackId(slot.slotIndex))}
-                      onStop={() => stop(musicTrackId(slot.slotIndex))}
-                      onSeek={(position) => seek(musicTrackId(slot.slotIndex), position)}
-                      getPosition={getPosition}
-                      onVolumeChange={(volume) => handleMusicVolume(slot.slotIndex, volume)}
-                      onLoopChange={(loop) => handleMusicLoop(slot.slotIndex, loop)}
-                      onMuteChange={(muted) => handleMusicMute(slot.slotIndex, muted)}
-                      onRename={(name) => handleMusicName(slot.slotIndex, name)}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {loadedMusicTrackIds.length >= 2 && (
-          <div className="mt-4 rounded-lg border border-border bg-surface p-4">
-            <h3 className="text-sm font-medium text-parchment-100">Crossfade</h3>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-              <select
-                value={crossfadeFrom}
-                onChange={(e) => setCrossfadeFrom(Number(e.target.value))}
-                className="focus-ring rounded-md border border-border-strong bg-background px-2 py-1 text-parchment-100 focus:border-ember-400"
-              >
-                {loadedMusicTrackIds.map((s) => (
-                  <option key={s.slotIndex} value={s.slotIndex}>
-                    Musikplats {s.slotIndex}
-                  </option>
-                ))}
-              </select>
-              <span className="text-muted-foreground">→</span>
-              <select
-                value={crossfadeTo}
-                onChange={(e) => setCrossfadeTo(Number(e.target.value))}
-                className="focus-ring rounded-md border border-border-strong bg-background px-2 py-1 text-parchment-100 focus:border-ember-400"
-              >
-                {loadedMusicTrackIds.map((s) => (
-                  <option key={s.slotIndex} value={s.slotIndex}>
-                    Musikplats {s.slotIndex}
-                  </option>
-                ))}
-              </select>
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                Tid
-                <input
-                  type="number"
-                  min={0}
-                  step={100}
-                  value={crossfadeMs}
-                  onChange={(e) => setCrossfadeMs(Number(e.target.value))}
-                  className="focus-ring w-20 rounded border border-border-strong bg-background px-1.5 py-0.5 text-parchment-100 focus:border-ember-400"
-                />
-                ms
-              </label>
-              <select
-                value={crossfadeCurve}
-                onChange={(e) => setCrossfadeCurve(e.target.value as FadeCurve)}
-                className="focus-ring rounded-md border border-border-strong bg-background px-2 py-1 text-xs text-parchment-100 focus:border-ember-400"
-              >
-                <option value="linear">Linjär</option>
-                <option value="exponential">Exponentiell</option>
-              </select>
-              <button
-                type="button"
-                onClick={() =>
-                  crossfade(musicTrackId(crossfadeFrom), musicTrackId(crossfadeTo), crossfadeMs, {
-                    curve: crossfadeCurve,
-                  })
-                }
-                disabled={crossfadeFrom === crossfadeTo}
-                className="focus-ring rounded-md bg-gradient-to-b from-ember-400 to-ember-500 px-3 py-1.5 text-sm font-medium text-ink-950 shadow-sm transition hover:shadow-glow-sm disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Crossfade
-              </button>
-            </div>
-          </div>
-        )}
-      </section>
-
-      <section>
-        <div className="flex items-center justify-between">
-          <h2 className="font-display text-xl font-medium tracking-wide text-parchment-100">
+      <section className="mt-10 border-t border-border pt-5">
+        <div className="flex flex-wrap items-center gap-4">
+          <h2 className="flex-none font-display text-lg font-medium tracking-wide text-parchment-100">
             One-shots
           </h2>
-          <span className="font-mono text-xs text-muted-foreground">
-            {filledOneShotCount}/{scene.oneShotSlots.length} platser
+          <span className="flex-none font-mono text-xs text-muted-foreground">
+            {filledOneShotCount}/{scene.oneShotSlots.length}
           </span>
+
+          <div className="flex min-w-0 flex-1 items-center justify-center gap-2 sm:max-w-xs">
+            <SpeakerOnIcon className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+            <Slider
+              value={oneShotBusVolume}
+              onChange={(v) => setGroupVolume(ONESHOT_GROUP_ID, v)}
+              className="w-full"
+              aria-label="Volym för alla one-shots"
+            />
+          </div>
+
+          <div className="flex flex-none items-center gap-2">
+            <Link
+              href="/library"
+              aria-label="Ljudbibliotek"
+              title="Ljudbibliotek"
+              className="focus-ring flex h-9 w-9 items-center justify-center rounded-lg border border-border-strong text-muted-foreground transition hover:border-ember-400/40 hover:text-ember-300"
+            >
+              <LibraryIcon className="h-4 w-4" />
+            </Link>
+            <Popover
+              panelClassName="w-80 max-w-[calc(100vw-2rem)]"
+              trigger={({ open, toggle }) => (
+                <button
+                  type="button"
+                  onClick={toggle}
+                  aria-expanded={open}
+                  aria-label="Ladda upp one-shot"
+                  title="Ladda upp one-shot"
+                  className={`focus-ring flex h-9 w-9 items-center justify-center rounded-lg border transition ${
+                    open
+                      ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
+                      : "border-border-strong text-muted-foreground hover:border-ember-400/40 hover:text-ember-300"
+                  }`}
+                >
+                  <UploadIcon className="h-4 w-4" />
+                </button>
+              )}
+            >
+              <AudioUploader
+                category="oneshot"
+                sceneId={sceneId}
+                onUploaded={() => void fetchAll()}
+                onAssigned={() => void fetchAll()}
+              />
+            </Popover>
+          </div>
         </div>
-        <div className="mt-3 grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
+
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-10">
           {scene.oneShotSlots.map((slot) => (
             <OneShotPad
               key={slot.slotIndex}
