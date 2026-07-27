@@ -38,21 +38,22 @@ type Track = {
    * Music streams from a media element rather than a decoded AudioBuffer.
    * decodeAudioData inflates a file to raw float PCM — a 74 MB, 65-minute
    * track becomes ~1.4 GB in memory, which kills the tab outright on iPad.
-   * The element streams and seeks natively at a near-constant memory cost.
+   *
+   * The element is also left out of the Web Audio graph entirely and driven by
+   * its own `volume`. Routing it through createMediaElementSource costs nothing
+   * on desktop but is a well-known source of silence on iOS: the node needs a
+   * CORS-clean response to avoid being muted as tainted media, and it depends
+   * on an AudioContext unlocked by a user gesture. Neither risk buys us
+   * anything here — every effect music needs is a volume multiplier.
    */
   element: HTMLAudioElement;
-  sourceNode: MediaElementAudioSourceNode;
-  gainNode: GainNode;
-  /**
-   * In series after gainNode, before the master bus. Mute is a pure on/off
-   * multiplier here so it never has to interact with volume/fade automation
-   * happening on gainNode — muting mid-fade, mid-crossfade, etc. just works.
-   */
-  muteGainNode: GainNode;
+  groupId: string;
   muted: boolean;
-  /** Target volume (0-1) — what the slider shows, independent of the ramp in progress. */
+  /** Target volume (0-1) — what the slider shows, independent of any fade in flight. */
   volume: number;
-  fadeTimer: ReturnType<typeof setTimeout> | null;
+  /** 0-1 multiplier owned by fadeIn/fadeOut; 1 when no fade has run. */
+  fadeGain: number;
+  fadeTimer: ReturnType<typeof setInterval> | null;
   /** Set when the track owns an object URL (local File) and must revoke it. */
   objectUrl: string | null;
 };
@@ -68,8 +69,8 @@ type OneShotSlot = {
 
 type Listener = (state: EngineState) => void;
 
-/** exponentialRampToValueAtTime rejects a target/start of exactly 0. */
-const MIN_GAIN = 0.0001;
+/** Step size for music fades, driven by a timer rather than AudioParam automation. */
+const FADE_STEP_MS = 25;
 
 /** Bus every one-shot slot routes through, so they share one fader. */
 export const ONESHOT_GROUP_ID = "oneshots";
@@ -94,7 +95,12 @@ export class AudioEngine {
   private masterVolume = 1;
   private tracks = new Map<string, Track>();
   private oneShots = new Map<string, OneShotSlot>();
-  private groups = new Map<string, { gainNode: GainNode; volume: number }>();
+  /**
+   * A group is just a fader value. Only the one-shot bus needs a real GainNode,
+   * since one-shots are the only thing still going through Web Audio; music
+   * groups apply their volume as a multiplier on each element instead.
+   */
+  private groups = new Map<string, { gainNode: GainNode | null; volume: number }>();
   private listeners = new Set<Listener>();
 
   private ensureContext(): AudioContext {
@@ -122,26 +128,40 @@ export class AudioEngine {
     return slot;
   }
 
-  /**
-   * Lazily creates a bus GainNode for a track group (e.g. one mixer column),
-   * sitting between member tracks and the master bus so the group's fader
-   * doesn't disturb each track's own volume.
-   */
-  private ensureGroup(groupId: string): GainNode {
-    const ctx = this.ensureContext();
+  /** Registers a group's fader without pulling an AudioContext into existence. */
+  private ensureGroup(groupId: string): { gainNode: GainNode | null; volume: number } {
     let group = this.groups.get(groupId);
     if (!group) {
-      const gainNode = ctx.createGain();
-      gainNode.connect(this.masterGain!);
-      group = { gainNode, volume: 1 };
+      group = { gainNode: null, volume: 1 };
       this.groups.set(groupId, group);
+    }
+    return group;
+  }
+
+  /** The one-shot bus is the only group backed by a real node. */
+  private ensureGroupGain(groupId: string): GainNode {
+    const ctx = this.ensureContext();
+    const group = this.ensureGroup(groupId);
+    if (!group.gainNode) {
+      group.gainNode = ctx.createGain();
+      group.gainNode.gain.value = group.volume;
+      group.gainNode.connect(this.masterGain!);
     }
     return group.gainNode;
   }
 
+  /** Collapses every fader that applies to a music track into the element's own volume. */
+  private applyTrackVolume(track: Track): void {
+    const groupVolume = this.groups.get(track.groupId)?.volume ?? 1;
+    const level = track.muted
+      ? 0
+      : track.volume * track.fadeGain * groupVolume * this.masterVolume;
+    track.element.volume = Math.min(1, Math.max(0, level));
+  }
+
   private clearFadeTimer(track: Track): void {
     if (track.fadeTimer !== null) {
-      clearTimeout(track.fadeTimer);
+      clearInterval(track.fadeTimer);
       track.fadeTimer = null;
     }
   }
@@ -204,11 +224,9 @@ export class AudioEngine {
     initialVolume = 1,
     objectUrl: string | null = null,
   ): Promise<void> {
-    const ctx = this.ensureContext();
     const element = new Audio();
-    // Required before the element may be routed through Web Audio; without it
-    // createMediaElementSource() yields silence for a cross-origin file.
-    element.crossOrigin = "anonymous";
+    // No crossOrigin: the element never enters the Web Audio graph, so there is
+    // nothing to taint, and plain <audio> playback needs no CORS at all.
     element.preload = "auto";
     element.src = url;
 
@@ -235,35 +253,28 @@ export class AudioEngine {
       throw err;
     }
 
-    const sourceNode = ctx.createMediaElementSource(element);
-    const gainNode = ctx.createGain();
-    const muteGainNode = ctx.createGain();
-    const groupGain = this.ensureGroup(groupId);
-    const volume = Math.min(1, Math.max(0, initialVolume));
-    gainNode.gain.value = volume;
-    sourceNode.connect(gainNode);
-    gainNode.connect(muteGainNode);
-    muteGainNode.connect(groupGain);
+    this.ensureGroup(groupId);
 
     // Keeps the UI honest about a track that reached its end on its own.
     element.addEventListener("ended", () => this.notify());
 
     // Checked right before committing (not before the await above) so that if two
     // loads for the same slot overlap — e.g. a retry click racing the initial load —
-    // whichever resolves last still stops/disconnects whatever the other one left
-    // behind, even if that track had already started playing in the meantime.
+    // whichever resolves last still tears down whatever the other one left behind,
+    // even if that track had already started playing in the meantime.
     if (this.tracks.has(id)) this.removeTrack(id);
-    this.tracks.set(id, {
+    const track: Track = {
       name,
       element,
-      sourceNode,
-      gainNode,
-      muteGainNode,
+      groupId,
       muted: false,
-      volume,
+      volume: Math.min(1, Math.max(0, initialVolume)),
+      fadeGain: 1,
       fadeTimer: null,
       objectUrl,
-    });
+    };
+    this.applyTrackVolume(track);
+    this.tracks.set(id, track);
     this.notify();
   }
 
@@ -280,7 +291,7 @@ export class AudioEngine {
     gainNode.gain.value = volume;
     // Routed through a shared bus rather than straight to master, so one-shots
     // can be faded as a group independently of the music columns.
-    gainNode.connect(this.ensureGroup(ONESHOT_GROUP_ID));
+    gainNode.connect(this.ensureGroupGain(ONESHOT_GROUP_ID));
     // Same replace-in-place rule as loadTrack: checked right before committing so an
     // overlapping load for the same slot can't silently orphan an already-triggered slot.
     if (this.oneShots.has(id)) this.removeOneShotSlot(id);
@@ -357,51 +368,58 @@ export class AudioEngine {
   }
 
   /**
-   * Applies a linear or exponential ramp on a track's GainNode to `target`
-   * over `durationMs`, anchored at `startValue`.
-   *
-   * Callers that just scheduled the starting point must pass it explicitly:
-   * `gain.value` still reports the pre-automation value until the rendering
-   * thread catches up, so anchoring on it would pin the ramp to the old gain
-   * and silently flatten the fade.
+   * Ramps a track's fade multiplier to `target` over `durationMs`, then runs
+   * `onDone`. Stepped from a timer rather than scheduled on an AudioParam,
+   * because the element's `volume` is a plain property with no automation of
+   * its own. FADE_STEP_MS is well below the threshold where a level change
+   * becomes audible as a step.
    */
-  private rampGain(
+  private rampFade(
     track: Track,
     target: number,
     durationMs: number,
     curve: FadeCurve,
-    startValue?: number,
+    onDone?: () => void,
   ): void {
-    const ctx = this.ensureContext();
-    const now = ctx.currentTime;
-    const durationSec = Math.max(0, durationMs) / 1000;
-    const gain = track.gainNode.gain;
-    const start = startValue ?? gain.value;
-    gain.cancelScheduledValues(now);
+    this.clearFadeTimer(track);
+    const from = track.fadeGain;
+    const duration = Math.max(0, durationMs);
 
-    if (durationSec === 0) {
-      gain.setValueAtTime(target, now);
+    if (duration === 0) {
+      track.fadeGain = target;
+      this.applyTrackVolume(track);
+      onDone?.();
+      this.notify();
       return;
     }
 
-    if (curve === "exponential") {
-      gain.setValueAtTime(Math.max(start, MIN_GAIN), now);
-      const end = Math.max(target, MIN_GAIN);
-      gain.exponentialRampToValueAtTime(end, now + durationSec);
-      if (target <= MIN_GAIN) gain.setValueAtTime(0, now + durationSec);
-    } else {
-      gain.setValueAtTime(start, now);
-      gain.linearRampToValueAtTime(target, now + durationSec);
-    }
+    const startedAt = Date.now();
+    track.fadeTimer = setInterval(() => {
+      const progress = Math.min(1, (Date.now() - startedAt) / duration);
+      // Perceived loudness tracks roughly the square of amplitude, so an
+      // "exponential" fade eases the amplitude rather than moving it linearly.
+      const shaped = curve === "exponential" ? progress * progress : progress;
+      track.fadeGain = from + (target - from) * shaped;
+      this.applyTrackVolume(track);
+
+      if (progress >= 1) {
+        this.clearFadeTimer(track);
+        track.fadeGain = target;
+        this.applyTrackVolume(track);
+        onDone?.();
+        this.notify();
+      }
+    }, FADE_STEP_MS);
+    this.notify();
   }
 
   play(id: string): void {
     const track = this.getTrack(id);
     if (!track.element.paused) return;
     this.clearFadeTimer(track);
-    const ctx = this.ensureContext();
-    track.gainNode.gain.cancelScheduledValues(ctx.currentTime);
-    track.gainNode.gain.setValueAtTime(track.volume, ctx.currentTime);
+    // An instant start always begins at full level, undoing any fade left behind.
+    track.fadeGain = 1;
+    this.applyTrackVolume(track);
     this.startElement(track);
     this.notify();
   }
@@ -410,8 +428,6 @@ export class AudioEngine {
     const track = this.getTrack(id);
     this.clearFadeTimer(track);
     if (track.element.paused) return;
-    const ctx = this.ensureContext();
-    track.gainNode.gain.cancelScheduledValues(ctx.currentTime);
     track.element.pause();
     this.notify();
   }
@@ -419,9 +435,8 @@ export class AudioEngine {
   stop(id: string): void {
     const track = this.getTrack(id);
     this.clearFadeTimer(track);
-    const ctx = this.ensureContext();
-    track.gainNode.gain.cancelScheduledValues(ctx.currentTime);
-    track.gainNode.gain.setValueAtTime(track.volume, ctx.currentTime);
+    track.fadeGain = 1;
+    this.applyTrackVolume(track);
     track.element.pause();
     track.element.currentTime = 0;
     this.notify();
@@ -470,29 +485,19 @@ export class AudioEngine {
     options: { targetVolume?: number; curve?: FadeCurve } = {},
   ): void {
     const track = this.getTrack(id);
-    const ctx = this.ensureContext();
     const target = options.targetVolume ?? track.volume;
     const curve = options.curve ?? "linear";
 
     this.clearFadeTimer(track);
     track.volume = target;
 
-    const fromSilence = track.element.paused;
-    if (fromSilence) {
-      track.gainNode.gain.cancelScheduledValues(ctx.currentTime);
-      track.gainNode.gain.setValueAtTime(0, ctx.currentTime);
+    if (track.element.paused) {
+      track.fadeGain = 0;
+      this.applyTrackVolume(track);
       this.startElement(track);
     }
 
-    // Starting from silence is the one case the gain node can't report yet, so say so.
-    this.rampGain(track, target, durationMs, curve, fromSilence ? 0 : undefined);
-
-    if (durationMs > 0) {
-      track.fadeTimer = setTimeout(() => {
-        track.fadeTimer = null;
-        this.notify();
-      }, durationMs);
-    }
+    this.rampFade(track, 1, durationMs, curve);
     this.notify();
   }
 
@@ -510,18 +515,12 @@ export class AudioEngine {
     const curve = options.curve ?? "linear";
     const settle = options.then ?? "stop";
 
-    this.clearFadeTimer(track);
-    this.rampGain(track, 0, durationMs, curve);
-
-    track.fadeTimer = setTimeout(() => {
-      track.fadeTimer = null;
+    this.rampFade(track, 0, durationMs, curve, () => {
       // "pause" keeps the playhead where the fade left it, so a later fade in
       // resumes rather than restarts — what a master play/pause toggle implies.
       if (settle === "stop") this.stop(id);
       else if (settle === "pause") this.pause(id);
-      else this.notify();
-    }, durationMs);
-    this.notify();
+    });
   }
 
   /** Fades `fromId` out and `toId` in over the same duration, in lockstep. */
@@ -538,12 +537,11 @@ export class AudioEngine {
 
   setVolume(id: string, volume: number): void {
     const track = this.getTrack(id);
-    const clamped = Math.min(1, Math.max(0, volume));
-    const ctx = this.ensureContext();
     this.clearFadeTimer(track);
-    track.volume = clamped;
-    track.gainNode.gain.cancelScheduledValues(ctx.currentTime);
-    track.gainNode.gain.setValueAtTime(clamped, ctx.currentTime);
+    track.volume = Math.min(1, Math.max(0, volume));
+    // Dragging the fader mid-fade is a deliberate override of that fade.
+    track.fadeGain = 1;
+    this.applyTrackVolume(track);
     this.notify();
   }
 
@@ -557,37 +555,37 @@ export class AudioEngine {
   setMuted(id: string, muted: boolean): void {
     const track = this.getTrack(id);
     track.muted = muted;
-    const ctx = this.ensureContext();
-    const gain = track.muteGainNode.gain;
-    const now = ctx.currentTime;
-    gain.cancelScheduledValues(now);
-    gain.setValueAtTime(gain.value, now);
-    gain.linearRampToValueAtTime(muted ? 0 : 1, now + 0.02);
+    this.applyTrackVolume(track);
     this.notify();
   }
 
-  /** Scene-wide volume multiplier applied after every track's own gain. */
-  setMasterVolume(volume: number, durationMs = 15): void {
+  /** Scene-wide volume multiplier applied on top of every track's own level. */
+  setMasterVolume(volume: number): void {
     const clamped = Math.min(1, Math.max(0, volume));
     this.masterVolume = clamped;
-    const ctx = this.ensureContext();
-    const gain = this.masterGain!.gain;
-    const now = ctx.currentTime;
-    gain.cancelScheduledValues(now);
-    gain.setValueAtTime(gain.value, now);
-    gain.linearRampToValueAtTime(clamped, now + Math.max(0, durationMs) / 1000);
+    // One-shots are still a Web Audio graph, so master lives in two places.
+    if (this.masterGain && this.audioContext) {
+      const now = this.audioContext.currentTime;
+      this.masterGain.gain.cancelScheduledValues(now);
+      this.masterGain.gain.setValueAtTime(clamped, now);
+    }
+    for (const track of this.tracks.values()) this.applyTrackVolume(track);
     this.notify();
   }
 
-  /** Bus volume for a group of tracks (e.g. one mixer column) — multiplies on top of each track's own gain. */
+  /** Bus volume for a group of tracks (e.g. one mixer column). */
   setGroupVolume(groupId: string, volume: number): void {
     const clamped = Math.min(1, Math.max(0, volume));
-    const gainNode = this.ensureGroup(groupId);
-    const group = this.groups.get(groupId)!;
+    const group = this.ensureGroup(groupId);
     group.volume = clamped;
-    const ctx = this.ensureContext();
-    gainNode.gain.cancelScheduledValues(ctx.currentTime);
-    gainNode.gain.setValueAtTime(clamped, ctx.currentTime);
+    if (group.gainNode && this.audioContext) {
+      const now = this.audioContext.currentTime;
+      group.gainNode.gain.cancelScheduledValues(now);
+      group.gainNode.gain.setValueAtTime(clamped, now);
+    }
+    for (const track of this.tracks.values()) {
+      if (track.groupId === groupId) this.applyTrackVolume(track);
+    }
     this.notify();
   }
 
@@ -596,9 +594,6 @@ export class AudioEngine {
     if (!track) return;
     this.clearFadeTimer(track);
     track.element.pause();
-    track.sourceNode.disconnect();
-    track.gainNode.disconnect();
-    track.muteGainNode.disconnect();
     // Dropping the src lets the browser release the buffered stream straight away.
     track.element.removeAttribute("src");
     track.element.load();
@@ -610,7 +605,7 @@ export class AudioEngine {
   dispose(): void {
     for (const id of [...this.tracks.keys()]) this.removeTrack(id);
     for (const id of [...this.oneShots.keys()]) this.removeOneShotSlot(id);
-    for (const group of this.groups.values()) group.gainNode.disconnect();
+    for (const group of this.groups.values()) group.gainNode?.disconnect();
     this.groups.clear();
     this.listeners.clear();
     void this.audioContext?.close();

@@ -760,7 +760,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
       {/* Two slot columns from tablet width up (iPad portrait is 768–834px). The
           centre column is desktop-only: on a tablet that width is worth more to
           the slots than to the artwork. */}
-      <div className="mt-4 grid gap-4 md:grid-cols-2 lg:gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,16rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,20rem)_minmax(0,1fr)]">
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,16rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,20rem)_minmax(0,1fr)]">
         {renderMusicColumn(musicColumns[0])}
 
         <div className="hidden flex-col items-center gap-4 lg:flex">
