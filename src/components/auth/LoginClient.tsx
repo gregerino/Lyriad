@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
@@ -38,7 +39,15 @@ export function LoginClient() {
         onSubmit={handleSubmit}
         className="w-full max-w-sm rounded-lg border border-border bg-surface p-8 shadow-lg"
       >
-        <p className="text-center font-mono text-xs uppercase tracking-[0.3em] text-ember-400">
+        <Image
+          src="/lyriad-icon.png"
+          alt=""
+          width={160}
+          height={160}
+          priority
+          className="mx-auto h-20 w-20"
+        />
+        <p className="mt-5 text-center font-mono text-xs uppercase tracking-[0.3em] text-ember-400">
           Lyriad
         </p>
         <h1 className="mt-2 text-center font-display text-2xl font-medium tracking-wide text-parchment-100">

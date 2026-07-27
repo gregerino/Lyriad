@@ -11,6 +11,7 @@ export type OneShotSlot = {
   sceneId: string;
   slotIndex: number; // 1-20
   audioFileId: string | null;
+  name: string | null;
   volume: number; // 0-1
   color: string | null;
   icon: string | null;

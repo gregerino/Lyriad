@@ -7,6 +7,7 @@ const MAX_SLOT = 20;
 
 const patchSchema = z.object({
   audioFileId: z.string().uuid().nullable().optional(),
+  name: z.string().trim().min(1).max(100).nullable().optional(),
   volume: z.number().min(0).max(1).optional(),
   color: z.string().trim().max(50).nullable().optional(),
   icon: z.string().trim().max(50).nullable().optional(),

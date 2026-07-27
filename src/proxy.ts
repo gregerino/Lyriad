@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth";
 
-const PUBLIC_PATHS = new Set(["/login", "/api/auth/login"]);
+const PUBLIC_PATHS = new Set(["/login", "/api/auth/login", "/lyriad-icon.png"]);
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

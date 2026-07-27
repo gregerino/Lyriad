@@ -39,6 +39,7 @@ function toOneShotSlot(row: typeof sceneOneshotSlots.$inferSelect): OneShotSlot 
     sceneId: row.sceneId,
     slotIndex: row.slotIndex,
     audioFileId: row.audioFileId,
+    name: row.name,
     volume: row.volume,
     color: row.color,
     icon: row.icon,
@@ -247,6 +248,7 @@ export async function updateOneShotSlot(
   slotIndex: number,
   patch: Partial<{
     audioFileId: string | null;
+    name: string | null;
     volume: number;
     color: string | null;
     icon: string | null;

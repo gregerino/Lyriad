@@ -1,0 +1,1 @@
+ALTER TABLE "scene_oneshot_slots" ADD COLUMN "name" text;

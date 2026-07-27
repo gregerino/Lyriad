@@ -311,7 +311,7 @@ export function LibraryClient() {
                 checked={selectedIds.has(file.id)}
                 onChange={() => toggleSelected(file.id)}
                 aria-label={`Markera ${file.filename}`}
-                className="focus-ring mt-1 accent-ember-400"
+                className="focus-ring lyriad-checkbox mt-1 h-3.5 w-3.5 flex-none"
               />
               <div className="flex-1">
                 <div className="flex items-center justify-between gap-2">

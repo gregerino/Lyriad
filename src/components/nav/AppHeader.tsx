@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -41,8 +42,16 @@ export function AppHeader() {
           </button>
           <Link
             href="/"
-            className="focus-ring rounded-sm font-display text-sm font-medium tracking-[0.2em] text-parchment-100 uppercase"
+            className="focus-ring flex items-center gap-2.5 rounded-sm font-display text-sm font-medium tracking-[0.2em] text-parchment-100 uppercase"
           >
+            <Image
+              src="/lyriad-icon.png"
+              alt=""
+              width={64}
+              height={64}
+              priority
+              className="h-8 w-8 flex-none"
+            />
             Lyriad
           </Link>
         </div>
@@ -64,7 +73,14 @@ export function AppHeader() {
         }`}
       >
         <div className="mb-4 flex items-center justify-between">
-          <span className="font-display text-sm font-medium tracking-[0.2em] text-parchment-100 uppercase">
+          <span className="flex items-center gap-2.5 font-display text-sm font-medium tracking-[0.2em] text-parchment-100 uppercase">
+            <Image
+              src="/lyriad-icon.png"
+              alt=""
+              width={64}
+              height={64}
+              className="h-8 w-8 flex-none"
+            />
             Lyriad
           </span>
           <button

@@ -3,12 +3,16 @@
 import { useState } from "react";
 import { AudioUploader } from "@/components/audio/AudioUploader";
 import { Popover } from "@/components/ui/Popover";
+import { RenameMenuItem } from "@/components/ui/RenameMenuItem";
 import { Slider } from "@/components/ui/Slider";
 import { KebabIcon, PlusIcon, SpeakerOnIcon } from "@/components/ui/icons";
 import type { OneShotState } from "@/audio-engine";
 import type { AudioFileWithMeta, OneShotSlot } from "@/types/domain";
 import { AudioFileSelect } from "./AudioFileSelect";
 import type { SlotLoadState } from "./types";
+
+const MENU_ITEM_CLASS =
+  "focus-ring flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-parchment-200 transition hover:bg-ink-700";
 
 type OneShotPadProps = {
   slot: OneShotSlot;
@@ -24,6 +28,7 @@ type OneShotPadProps = {
   onTrigger: () => void;
   onStop: () => void;
   onVolumeChange: (volume: number) => void;
+  onRename: (name: string | null) => void;
 };
 
 function shortName(filename: string | undefined): string {
@@ -45,9 +50,18 @@ export function OneShotPad({
   onTrigger,
   onStop,
   onVolumeChange,
+  onRename,
 }: OneShotPadProps) {
   const [pulseKey, setPulseKey] = useState(0);
   const isActive = Boolean(oneShot && oneShot.activeCount > 0);
+
+  // What the pad reads when the slot carries no custom name of its own.
+  const fallbackName = shortName(file?.filename);
+  const displayName = slot.name ?? fallbackName;
+
+  function commitName(next: string | null) {
+    if (next !== slot.name) onRename(next);
+  }
 
   function handlePress() {
     if (isActive) {
@@ -127,9 +141,7 @@ export function OneShotPad({
         onClick={handlePress}
         disabled={loadState.status !== "loaded"}
         aria-pressed={isActive}
-        aria-label={
-          isActive ? `Stoppa ${shortName(file?.filename)}` : `Spela ${shortName(file?.filename)}`
-        }
+        aria-label={isActive ? `Stoppa ${displayName}` : `Spela ${displayName}`}
         className={`focus-ring relative isolate flex h-14 w-full items-center overflow-hidden rounded-lg border px-3 text-left transition enabled:active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${
           isActive
             ? "border-ember-400/60 bg-ember-400/10"
@@ -137,11 +149,12 @@ export function OneShotPad({
         }`}
       >
         <span
+          title={file?.filename}
           className={`relative z-10 line-clamp-2 pr-4 text-xs font-medium ${
             isActive ? "text-ember-200" : "text-parchment-100"
           }`}
         >
-          {shortName(file?.filename)}
+          {displayName}
         </span>
         {oneShot && oneShot.activeCount > 1 && (
           <span className="absolute bottom-1.5 right-1.5 z-10 rounded-full bg-ember-400 px-1.5 text-[10px] font-semibold text-ink-950">
@@ -166,7 +179,7 @@ export function OneShotPad({
               type="button"
               onClick={toggle}
               aria-expanded={open}
-              aria-label={`Alternativ för ${shortName(file?.filename)}`}
+              aria-label={`Alternativ för ${displayName}`}
               className="focus-ring flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground/80 transition hover:bg-ink-700 hover:text-parchment-100"
             >
               <KebabIcon className="h-3 w-3" />
@@ -175,6 +188,14 @@ export function OneShotPad({
         >
           {({ close }) => (
             <div className="flex flex-col gap-2">
+              <RenameMenuItem
+                value={displayName}
+                fallback={fallbackName}
+                onCommit={commitName}
+                onDone={close}
+                itemClassName={MENU_ITEM_CLASS}
+              />
+
               {oneShot && (
                 <label className="flex items-center gap-2 text-xs text-parchment-200">
                   <SpeakerOnIcon className="h-3.5 w-3.5 flex-none text-muted-foreground" />

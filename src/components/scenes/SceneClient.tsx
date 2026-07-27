@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ONESHOT_GROUP_ID, useAudioEngine } from "@/audio-engine";
 import { AudioUploader } from "@/components/audio/AudioUploader";
@@ -37,6 +38,10 @@ const musicGroupId = (slotIndex: number) => (slotIndex <= MUSIC_COLUMN_SIZE ? "l
 /** The only fade lengths on offer — deliberately two presets, not a free-form field. */
 const FADE_DURATIONS_MS = [3000, 5000];
 
+/** What "Återställ ljud" puts the desk back to. Slots match the column default. */
+const DEFAULT_BUS_VOLUME = 1;
+const DEFAULT_SLOT_VOLUME = 0.8;
+
 function replaceMusicSlot(scene: Scene, slot: MusicSlot): Scene {
   return {
     ...scene,
@@ -54,6 +59,8 @@ function replaceOneShotSlot(scene: Scene, slot: OneShotSlot): Scene {
 type SceneClientProps = { sceneId: string };
 
 export function SceneClient({ sceneId }: SceneClientProps) {
+  const router = useRouter();
+
   const [scene, setScene] = useState<Scene | null>(null);
   const [audioFiles, setAudioFiles] = useState<AudioFileWithMeta[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,6 +80,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
 
   const [mixPresets, setMixPresets] = useState<MixPreset[]>([]);
   const [deletingPresetId, setDeletingPresetId] = useState<string | null>(null);
+  const [deletingScene, setDeletingScene] = useState(false);
 
   const loadedMusicRef = useRef<Record<number, string>>({});
   const loadedOneshotRef = useRef<Record<number, string>>({});
@@ -330,7 +338,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   async function assignOneShotSlot(slotIndex: number, audioFileId: string) {
     setOneshotAssigning((prev) => ({ ...prev, [slotIndex]: true }));
     setOneshotSlotErrors((prev) => ({ ...prev, [slotIndex]: null }));
-    const result = await patchOneShotSlot(slotIndex, { audioFileId });
+    const result = await patchOneShotSlot(slotIndex, { audioFileId, name: null });
     if (!result.ok) {
       if (result.status === 409) {
         setOneshotSlotErrors((prev) => ({
@@ -350,7 +358,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
 
   async function clearOneShotSlot(slotIndex: number) {
     setOneshotAssigning((prev) => ({ ...prev, [slotIndex]: true }));
-    const result = await patchOneShotSlot(slotIndex, { audioFileId: null });
+    const result = await patchOneShotSlot(slotIndex, { audioFileId: null, name: null });
     if (result.ok) setOneshotSlotErrors((prev) => ({ ...prev, [slotIndex]: null }));
     setOneshotAssigning((prev) => ({ ...prev, [slotIndex]: false }));
   }
@@ -458,6 +466,79 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     schedulePersist(`oneshot-volume-${slotIndex}`, () =>
       void patchOneShotSlot(slotIndex, { volume })
     );
+  }
+
+  async function renameScene(name: string) {
+    const previous = scene?.name;
+    if (previous === undefined || name === previous) return;
+    setScene((prev) => (prev ? { ...prev, name } : prev));
+    const res = await fetch(`/api/scenes/${sceneId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).catch(() => null);
+    if (!res?.ok) setScene((prev) => (prev ? { ...prev, name: previous } : prev));
+  }
+
+  /**
+   * Back to a neutral desk: silence first, then every fader to its default.
+   * Slots already sitting at the default are left alone rather than PATCHed
+   * back to the value they already hold.
+   */
+  function resetAudio() {
+    if (!scene) return;
+
+    // Only what the engine actually holds: it throws on an unknown track, and
+    // most slots in a scene are empty or not loaded yet.
+    for (const slot of scene.musicSlots) {
+      const trackId = musicTrackId(slot.slotIndex);
+      if (tracks[trackId]) stop(trackId);
+    }
+    for (const slot of scene.oneShotSlots) {
+      const trackId = oneshotTrackId(slot.slotIndex);
+      if (oneShots[trackId]) stopOneShot(trackId);
+    }
+
+    setMasterVolume(DEFAULT_BUS_VOLUME);
+    for (const groupId of ["left", "right", ONESHOT_GROUP_ID]) {
+      setGroupVolume(groupId, DEFAULT_BUS_VOLUME);
+    }
+
+    for (const slot of scene.musicSlots) {
+      if (slot.volume !== DEFAULT_SLOT_VOLUME) {
+        handleMusicVolume(slot.slotIndex, DEFAULT_SLOT_VOLUME);
+      }
+    }
+    for (const slot of scene.oneShotSlots) {
+      if (slot.volume !== DEFAULT_SLOT_VOLUME) {
+        handleOneShotVolume(slot.slotIndex, DEFAULT_SLOT_VOLUME);
+      }
+    }
+  }
+
+  async function deleteScene() {
+    setDeletingScene(true);
+    const res = await fetch(`/api/scenes/${sceneId}`, { method: "DELETE" }).catch(() => null);
+    if (!res?.ok) {
+      setDeletingScene(false);
+      return;
+    }
+    // "/" checks that the remembered scene still exists, but leaving a pointer
+    // to something we just deleted would only cost it a lookup to find out.
+    document.cookie = `${LAST_SCENE_COOKIE}=; path=/; max-age=0; samesite=lax`;
+    router.push("/scenes");
+  }
+
+  function handleOneShotName(slotIndex: number, name: string | null) {
+    setScene((prev) =>
+      prev
+        ? replaceOneShotSlot(prev, {
+            ...prev.oneShotSlots.find((s) => s.slotIndex === slotIndex)!,
+            name,
+          })
+        : prev
+    );
+    void patchOneShotSlot(slotIndex, { name });
   }
 
   function applyMixPreset(preset: MixPreset) {
@@ -711,6 +792,11 @@ export function SceneClient({ sceneId }: SceneClientProps) {
             onCrossfade={(from, to, durationMs, curve) =>
               crossfade(musicTrackId(from), musicTrackId(to), durationMs, { curve })
             }
+            sceneName={scene.name}
+            onRenameScene={(name) => void renameScene(name)}
+            onResetAudio={resetAudio}
+            onDeleteScene={() => void deleteScene()}
+            deletingScene={deletingScene}
           />
         </div>
       </header>
@@ -881,6 +967,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
               onTrigger={() => triggerOneShot(oneshotTrackId(slot.slotIndex))}
               onStop={() => stopOneShot(oneshotTrackId(slot.slotIndex))}
               onVolumeChange={(volume) => handleOneShotVolume(slot.slotIndex, volume)}
+              onRename={(name) => handleOneShotName(slot.slotIndex, name)}
             />
           ))}
         </div>

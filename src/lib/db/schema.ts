@@ -99,6 +99,7 @@ export const sceneOneshotSlots = pgTable(
     audioFileId: uuid("audio_file_id").references(() => audioFiles.id, {
       onDelete: "set null",
     }),
+    name: text("name"),
     volume: real("volume").notNull().default(0.8),
     color: text("color"),
     icon: text("icon"),

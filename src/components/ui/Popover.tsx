@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+
+/** Breathing room kept between a nudged panel and the edge of the window. */
+const VIEWPORT_MARGIN = 8;
 
 type PopoverProps = {
   /** Rendered as the toggle. Gets the open state so it can style itself. */
@@ -25,6 +28,28 @@ export function Popover({
 }: PopoverProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [shift, setShift] = useState(0);
+
+  // A panel anchored to something near the edge of the window — the kebab on the
+  // leftmost one-shot pad, say — would otherwise hang off-screen with half its
+  // contents unreachable. Nudge it back in. The measurement includes whatever
+  // shift is already applied, so the correction converges after one extra pass.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const rect = panelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    let delta = 0;
+    if (rect.left < VIEWPORT_MARGIN) {
+      delta = VIEWPORT_MARGIN - rect.left;
+    } else if (rect.right > window.innerWidth - VIEWPORT_MARGIN) {
+      delta = Math.max(
+        window.innerWidth - VIEWPORT_MARGIN - rect.right,
+        VIEWPORT_MARGIN - rect.left
+      );
+    }
+    if (delta !== 0) setShift((current) => current + delta);
+  }, [open, shift]);
 
   useEffect(() => {
     if (!open) return;
@@ -46,9 +71,19 @@ export function Popover({
 
   return (
     <div ref={containerRef} className={`relative ${className ?? ""}`}>
-      {trigger({ open, toggle: () => setOpen((v) => !v) })}
+      {trigger({
+        open,
+        toggle: () => {
+          // Cleared here rather than on close so the next open always measures
+          // from the panel's natural position instead of a stale correction.
+          setShift(0);
+          setOpen((v) => !v);
+        },
+      })}
       {open && (
         <div
+          ref={panelRef}
+          style={shift ? { transform: `translateX(${shift}px)` } : undefined}
           className={`absolute z-40 mt-2 rounded-lg border border-border-strong bg-surface-elevated p-3 shadow-lg ${
             align === "right" ? "right-0" : "left-0"
           } ${panelClassName ?? ""}`}

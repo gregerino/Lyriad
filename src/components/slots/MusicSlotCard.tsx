@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { AudioUploader } from "@/components/audio/AudioUploader";
 import { Popover } from "@/components/ui/Popover";
+import { RenameMenuItem } from "@/components/ui/RenameMenuItem";
 import { Slider } from "@/components/ui/Slider";
 import {
   KebabIcon,
@@ -72,17 +73,9 @@ export function MusicSlotCard({
   onRename,
 }: MusicSlotCardProps) {
   const ready = Boolean(slot.audioFileId) && loadState.status === "loaded" && Boolean(track);
-  const resolvedName = slot.name ?? file?.filename ?? "Okänd fil";
-
-  const [nameDraft, setNameDraft] = useState(resolvedName);
-  // Resets the draft whenever the resolved name changes externally (reassignment,
-  // refetch) — the sanctioned "adjust state during render" pattern, not an effect,
-  // so typing in progress is never clobbered by an unrelated re-render.
-  const [syncedName, setSyncedName] = useState(resolvedName);
-  if (resolvedName !== syncedName) {
-    setSyncedName(resolvedName);
-    setNameDraft(resolvedName);
-  }
+  // What the card reads when the slot carries no custom name of its own.
+  const fallbackName = file?.filename ?? "Okänd fil";
+  const resolvedName = slot.name ?? fallbackName;
 
   // Playhead, in seconds. `scrubTo` holds the value being dragged so the poll
   // below can't yank the handle back out from under the user mid-drag.
@@ -111,9 +104,7 @@ export function MusicSlotCard({
     if (trackId) setPosition(getPosition(trackId));
   }
 
-  function commitName() {
-    const trimmed = nameDraft.trim();
-    const next = trimmed === "" ? null : trimmed;
+  function commitName(next: string | null) {
     if (next !== slot.name) onRename(next);
   }
 
@@ -215,25 +206,12 @@ export function MusicSlotCard({
 
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-2">
-            <input
-              type="text"
-              value={nameDraft}
-              onChange={(e) => setNameDraft(e.target.value)}
-              onBlur={commitName}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  commitName();
-                  (e.target as HTMLInputElement).blur();
-                }
-                if (e.key === "Escape") {
-                  setNameDraft(resolvedName);
-                  (e.target as HTMLInputElement).blur();
-                }
-              }}
+            <h3
               title={file?.filename}
-              aria-label="Namn på musikplats"
-              className="focus-ring min-w-0 flex-1 truncate rounded bg-transparent text-sm font-medium text-parchment-100 focus:bg-background"
-            />
+              className="min-w-0 flex-1 truncate text-sm font-medium text-parchment-100"
+            >
+              {resolvedName}
+            </h3>
 
             <Popover
               panelClassName="w-48"
@@ -251,6 +229,13 @@ export function MusicSlotCard({
             >
               {({ close }) => (
                 <div className="flex flex-col gap-0.5">
+                  <RenameMenuItem
+                    value={resolvedName}
+                    fallback={fallbackName}
+                    onCommit={commitName}
+                    onDone={close}
+                    itemClassName={MENU_ITEM_CLASS}
+                  />
                   <button
                     type="button"
                     onClick={() => onLoopChange(!track?.loop)}
