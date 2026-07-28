@@ -13,6 +13,7 @@ import { OneShotPad } from "@/components/slots/OneShotPad";
 import type { SlotLoadState } from "@/components/slots/types";
 import { Popover } from "@/components/ui/Popover";
 import { Slider } from "@/components/ui/Slider";
+import { Tooltip } from "@/components/ui/Tooltip";
 import {
   ChevronDownIcon,
   LibraryIcon,
@@ -665,38 +666,42 @@ export function SceneClient({ sceneId }: SceneClientProps) {
             className="w-full"
             aria-label={`Bussvolym för ${column.label.toLowerCase()}`}
           />
-          <button
-            type="button"
-            onClick={() => toggleColumnLoop(column.slots.map((s) => s.slotIndex))}
-            aria-pressed={allLooping}
-            aria-label={
-              allLooping
-                ? `Stäng av loop för ${column.label.toLowerCase()}`
-                : `Loopa ${column.label.toLowerCase()}`
-            }
-            className={`focus-ring flex h-7 w-7 flex-none items-center justify-center rounded-md transition ${
-              allLooping
-                ? "text-ember-300"
-                : "text-muted-foreground hover:text-ember-300"
-            }`}
-          >
-            <LoopIcon className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              setCollapsedColumns((prev) => ({ ...prev, [column.id]: !isCollapsed }))
-            }
-            aria-expanded={!isCollapsed}
-            aria-label={
-              isCollapsed
-                ? `Visa ${column.label.toLowerCase()}`
-                : `Dölj ${column.label.toLowerCase()}`
-            }
-            className="focus-ring flex h-7 w-7 flex-none items-center justify-center rounded-md text-muted-foreground transition hover:text-parchment-100"
-          >
-            <ChevronDownIcon className={`h-4 w-4 transition ${isCollapsed ? "" : "rotate-180"}`} />
-          </button>
+          <Tooltip label={allLooping ? "Loop på" : "Loop av"} align="end" className="flex-none">
+            <button
+              type="button"
+              onClick={() => toggleColumnLoop(column.slots.map((s) => s.slotIndex))}
+              aria-pressed={allLooping}
+              aria-label={
+                allLooping
+                  ? `Stäng av loop för ${column.label.toLowerCase()}`
+                  : `Loopa ${column.label.toLowerCase()}`
+              }
+              className={`focus-ring flex h-7 w-7 flex-none items-center justify-center rounded-md transition ${
+                allLooping
+                  ? "text-ember-300"
+                  : "text-muted-foreground hover:text-ember-300"
+              }`}
+            >
+              <LoopIcon className="h-4 w-4" />
+            </button>
+          </Tooltip>
+          <Tooltip label={isCollapsed ? "Visa kolumn" : "Dölj kolumn"} align="end" className="flex-none">
+            <button
+              type="button"
+              onClick={() =>
+                setCollapsedColumns((prev) => ({ ...prev, [column.id]: !isCollapsed }))
+              }
+              aria-expanded={!isCollapsed}
+              aria-label={
+                isCollapsed
+                  ? `Visa ${column.label.toLowerCase()}`
+                  : `Dölj ${column.label.toLowerCase()}`
+              }
+              className="focus-ring flex h-7 w-7 flex-none items-center justify-center rounded-md text-muted-foreground transition hover:text-parchment-100"
+            >
+              <ChevronDownIcon className={`h-4 w-4 transition ${isCollapsed ? "" : "rotate-180"}`} />
+            </button>
+          </Tooltip>
         </div>
 
         {!isCollapsed && (
@@ -741,32 +746,34 @@ export function SceneClient({ sceneId }: SceneClientProps) {
         <SceneTabs currentSceneId={scene.id} currentSceneName={scene.name} />
 
         <div className="flex flex-none items-center gap-2">
-          <Link
-            href="/library"
-            aria-label="Ljudbibliotek"
-            title="Ljudbibliotek"
-            className="focus-ring flex h-9 w-9 items-center justify-center rounded-lg border border-border-strong text-muted-foreground transition hover:border-ember-400/40 hover:text-ember-300"
-          >
-            <LibraryIcon className="h-4 w-4" />
-          </Link>
+          <Tooltip label="Ljudbibliotek" align="end">
+            <Link
+              href="/library"
+              aria-label="Ljudbibliotek"
+              className="focus-ring flex h-9 w-9 items-center justify-center rounded-lg border border-border-strong text-muted-foreground transition hover:border-ember-400/40 hover:text-ember-300"
+            >
+              <LibraryIcon className="h-4 w-4" />
+            </Link>
+          </Tooltip>
 
           <Popover
             panelClassName="w-80 max-w-[calc(100vw-2rem)]"
             trigger={({ open, toggle }) => (
-              <button
-                type="button"
-                onClick={toggle}
-                aria-expanded={open}
-                aria-label="Ladda upp ljud"
-                title="Ladda upp ljud"
-                className={`focus-ring flex h-9 w-9 items-center justify-center rounded-lg border transition ${
-                  open
-                    ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
-                    : "border-border-strong text-muted-foreground hover:border-ember-400/40 hover:text-ember-300"
-                }`}
-              >
-                <UploadIcon className="h-4 w-4" />
-              </button>
+              <Tooltip label="Ladda upp ljud" align="end">
+                <button
+                  type="button"
+                  onClick={toggle}
+                  aria-expanded={open}
+                  aria-label="Ladda upp ljud"
+                  className={`focus-ring flex h-9 w-9 items-center justify-center rounded-lg border transition ${
+                    open
+                      ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
+                      : "border-border-strong text-muted-foreground hover:border-ember-400/40 hover:text-ember-300"
+                  }`}
+                >
+                  <UploadIcon className="h-4 w-4" />
+                </button>
+              </Tooltip>
             )}
           >
             <AudioUploader
@@ -813,20 +820,24 @@ export function SceneClient({ sceneId }: SceneClientProps) {
       {/* Below the artwork breakpoint the master controls need a home of their own,
           since the centre column (and its orb) only exists from lg up. */}
       <div className="mt-5 flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2 lg:hidden">
-        <button
-          type="button"
-          onClick={toggleMasterPlayback}
-          disabled={loadedMusicTrackIds.length === 0}
-          aria-label={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
-          title={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
-          className="focus-ring flex h-10 w-10 flex-none items-center justify-center rounded-full bg-gradient-to-b from-ember-400 to-ember-500 text-ink-950 shadow-glow-sm transition hover:shadow-glow disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
+        <Tooltip
+          label={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
+          className="flex-none"
         >
-          {anyMusicPlaying ? (
-            <PauseIcon className="h-4 w-4" />
-          ) : (
-            <PlayIcon className="h-4 w-4 translate-x-0.5" />
-          )}
-        </button>
+          <button
+            type="button"
+            onClick={toggleMasterPlayback}
+            disabled={loadedMusicTrackIds.length === 0}
+            aria-label={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
+            className="focus-ring flex h-10 w-10 flex-none items-center justify-center rounded-full bg-gradient-to-b from-ember-400 to-ember-500 text-ink-950 shadow-glow-sm transition hover:shadow-glow disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
+          >
+            {anyMusicPlaying ? (
+              <PauseIcon className="h-4 w-4" />
+            ) : (
+              <PlayIcon className="h-4 w-4 translate-x-0.5" />
+            )}
+          </button>
+        </Tooltip>
         <span className="flex-none text-xs text-muted-foreground">
           {loadedMusicTrackIds.length === 0
             ? "Inga spår laddade"
@@ -863,20 +874,21 @@ export function SceneClient({ sceneId }: SceneClientProps) {
           <SceneArtwork sceneId={scene.id} active={anyMusicPlaying} className="max-w-[18rem]" />
 
           <div className="flex flex-col items-center gap-2">
-            <button
-              type="button"
-              onClick={toggleMasterPlayback}
-              disabled={loadedMusicTrackIds.length === 0}
-              aria-label={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
-              title={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
-              className="focus-ring flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-b from-ember-400 to-ember-500 text-ink-950 shadow-glow-sm transition hover:shadow-glow disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
-            >
-              {anyMusicPlaying ? (
-                <PauseIcon className="h-5 w-5" />
-              ) : (
-                <PlayIcon className="h-5 w-5 translate-x-0.5" />
-              )}
-            </button>
+            <Tooltip label={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}>
+              <button
+                type="button"
+                onClick={toggleMasterPlayback}
+                disabled={loadedMusicTrackIds.length === 0}
+                aria-label={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
+                className="focus-ring flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-b from-ember-400 to-ember-500 text-ink-950 shadow-glow-sm transition hover:shadow-glow disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
+              >
+                {anyMusicPlaying ? (
+                  <PauseIcon className="h-5 w-5" />
+                ) : (
+                  <PlayIcon className="h-5 w-5 translate-x-0.5" />
+                )}
+              </button>
+            </Tooltip>
             <p className="text-xs text-muted-foreground">
               {loadedMusicTrackIds.length === 0
                 ? "Inga spår laddade"
@@ -910,31 +922,33 @@ export function SceneClient({ sceneId }: SceneClientProps) {
           </div>
 
           <div className="flex flex-none items-center gap-2">
-            <Link
-              href="/library"
-              aria-label="Ljudbibliotek"
-              title="Ljudbibliotek"
-              className="focus-ring flex h-9 w-9 items-center justify-center rounded-lg border border-border-strong text-muted-foreground transition hover:border-ember-400/40 hover:text-ember-300"
-            >
-              <LibraryIcon className="h-4 w-4" />
-            </Link>
+            <Tooltip label="Ljudbibliotek" align="end">
+              <Link
+                href="/library"
+                aria-label="Ljudbibliotek"
+                className="focus-ring flex h-9 w-9 items-center justify-center rounded-lg border border-border-strong text-muted-foreground transition hover:border-ember-400/40 hover:text-ember-300"
+              >
+                <LibraryIcon className="h-4 w-4" />
+              </Link>
+            </Tooltip>
             <Popover
               panelClassName="w-80 max-w-[calc(100vw-2rem)]"
               trigger={({ open, toggle }) => (
-                <button
-                  type="button"
-                  onClick={toggle}
-                  aria-expanded={open}
-                  aria-label="Ladda upp one-shot"
-                  title="Ladda upp one-shot"
-                  className={`focus-ring flex h-9 w-9 items-center justify-center rounded-lg border transition ${
-                    open
-                      ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
-                      : "border-border-strong text-muted-foreground hover:border-ember-400/40 hover:text-ember-300"
-                  }`}
-                >
-                  <UploadIcon className="h-4 w-4" />
-                </button>
+                <Tooltip label="Ladda upp one-shot" align="end">
+                  <button
+                    type="button"
+                    onClick={toggle}
+                    aria-expanded={open}
+                    aria-label="Ladda upp one-shot"
+                    className={`focus-ring flex h-9 w-9 items-center justify-center rounded-lg border transition ${
+                      open
+                        ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
+                        : "border-border-strong text-muted-foreground hover:border-ember-400/40 hover:text-ember-300"
+                    }`}
+                  >
+                    <UploadIcon className="h-4 w-4" />
+                  </button>
+                </Tooltip>
               )}
             >
               <AudioUploader

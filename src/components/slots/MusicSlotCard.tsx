@@ -5,6 +5,7 @@ import { AudioUploader } from "@/components/audio/AudioUploader";
 import { Popover } from "@/components/ui/Popover";
 import { RenameMenuItem } from "@/components/ui/RenameMenuItem";
 import { Slider } from "@/components/ui/Slider";
+import { Tooltip } from "@/components/ui/Tooltip";
 import {
   KebabIcon,
   LoopIcon,
@@ -185,24 +186,25 @@ export function MusicSlotCard({
   return (
     <div className="rounded-xl border border-border bg-surface px-3 py-2.5 shadow-xs transition hover:border-border-strong">
       <div className="flex items-start gap-3">
-        <button
-          type="button"
-          onClick={() => (isPlaying ? onStop() : onPlay())}
-          disabled={!ready}
-          aria-label={isPlaying ? `Stoppa ${resolvedName}` : `Spela ${resolvedName}`}
-          title={isPlaying ? "Stoppa" : "Spela"}
-          className={`focus-ring group relative flex h-10 w-10 flex-none items-center justify-center overflow-hidden rounded-md border transition disabled:cursor-not-allowed disabled:opacity-40 ${
-            isPlaying
-              ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
-              : "border-border-strong bg-ink-850 text-muted-foreground enabled:hover:border-ember-400/40 enabled:hover:text-ember-300"
-          }`}
-        >
-          {isPlaying ? (
-            <StopIcon className="h-3.5 w-3.5" />
-          ) : (
-            <PlayIcon className="h-3.5 w-3.5 translate-x-0.5" />
-          )}
-        </button>
+        <Tooltip label={isPlaying ? "Stoppa" : "Spela"} className="flex-none">
+          <button
+            type="button"
+            onClick={() => (isPlaying ? onStop() : onPlay())}
+            disabled={!ready}
+            aria-label={isPlaying ? `Stoppa ${resolvedName}` : `Spela ${resolvedName}`}
+            className={`focus-ring group relative flex h-10 w-10 flex-none items-center justify-center overflow-hidden rounded-md border transition disabled:cursor-not-allowed disabled:opacity-40 ${
+              isPlaying
+                ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
+                : "border-border-strong bg-ink-850 text-muted-foreground enabled:hover:border-ember-400/40 enabled:hover:text-ember-300"
+            }`}
+          >
+            {isPlaying ? (
+              <StopIcon className="h-3.5 w-3.5" />
+            ) : (
+              <PlayIcon className="h-3.5 w-3.5 translate-x-0.5" />
+            )}
+          </button>
+        </Tooltip>
 
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-2">
@@ -216,15 +218,17 @@ export function MusicSlotCard({
             <Popover
               panelClassName="w-48"
               trigger={({ open, toggle }) => (
-                <button
-                  type="button"
-                  onClick={toggle}
-                  aria-expanded={open}
-                  aria-label={`Alternativ för ${resolvedName}`}
-                  className="focus-ring -mr-1 flex h-6 w-6 flex-none items-center justify-center rounded-full text-muted-foreground/80 transition hover:bg-ink-700 hover:text-parchment-100"
-                >
-                  <KebabIcon className="h-3.5 w-3.5" />
-                </button>
+                <Tooltip label="Alternativ" align="end" className="-mr-1 flex-none">
+                  <button
+                    type="button"
+                    onClick={toggle}
+                    aria-expanded={open}
+                    aria-label={`Alternativ för ${resolvedName}`}
+                    className="focus-ring flex h-6 w-6 flex-none items-center justify-center rounded-full text-muted-foreground/80 transition hover:bg-ink-700 hover:text-parchment-100"
+                  >
+                    <KebabIcon className="h-3.5 w-3.5" />
+                  </button>
+                </Tooltip>
               )}
             >
               {({ close }) => (

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type MouseEvent } from "react";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { PlusIcon, StarIcon, XIcon } from "@/components/ui/icons";
 import { LAST_SCENE_COOKIE } from "@/lib/lastScene";
 import type { Scene } from "@/types/domain";
@@ -214,31 +215,37 @@ export function ScenesClient() {
                   )}
                 </Link>
                 <div className="absolute right-3 top-4 flex items-center gap-2.5">
-                  <button
-                    type="button"
-                    onClick={(e) => void toggleFavorite(e, scene.id, scene.favorite)}
-                    aria-label={
-                      scene.favorite ? `Ta bort ${scene.name} som favorit` : `Gör ${scene.name} till favorit`
-                    }
-                    title={scene.favorite ? "Ta bort som favorit" : "Gör till favorit"}
-                    className={`focus-ring flex-none rounded-full transition focus-visible:opacity-100 ${
-                      scene.favorite
-                        ? "text-ember-400 hover:text-ember-300"
-                        : "text-muted-foreground/60 opacity-0 group-hover:opacity-100 hover:text-ember-300"
-                    }`}
+                  <Tooltip
+                    label={scene.favorite ? "Ta bort som favorit" : "Gör till favorit"}
+                    placement="bottom"
+                    className="flex-none"
                   >
-                    <StarIcon className="h-4 w-4" filled={scene.favorite} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => void deleteScene(e, scene.id)}
-                    disabled={deletingId === scene.id}
-                    aria-label={`Ta bort ${scene.name}`}
-                    title="Ta bort scen"
-                    className="focus-ring flex-none rounded-full text-muted-foreground/80 opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 hover:text-wine-400 disabled:opacity-40"
-                  >
-                    <XIcon className="h-4 w-4" />
-                  </button>
+                    <button
+                      type="button"
+                      onClick={(e) => void toggleFavorite(e, scene.id, scene.favorite)}
+                      aria-label={
+                        scene.favorite ? `Ta bort ${scene.name} som favorit` : `Gör ${scene.name} till favorit`
+                      }
+                      className={`focus-ring flex-none rounded-full transition focus-visible:opacity-100 ${
+                        scene.favorite
+                          ? "text-ember-400 hover:text-ember-300"
+                          : "text-muted-foreground/60 opacity-0 group-hover:opacity-100 hover:text-ember-300"
+                      }`}
+                    >
+                      <StarIcon className="h-4 w-4" filled={scene.favorite} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip label="Ta bort scen" placement="bottom" align="end" className="flex-none">
+                    <button
+                      type="button"
+                      onClick={(e) => void deleteScene(e, scene.id)}
+                      disabled={deletingId === scene.id}
+                      aria-label={`Ta bort ${scene.name}`}
+                      className="focus-ring flex-none rounded-full text-muted-foreground/80 opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 hover:text-wine-400 disabled:opacity-40"
+                    >
+                      <XIcon className="h-4 w-4" />
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
             );

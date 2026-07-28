@@ -5,6 +5,7 @@ import { AudioUploader } from "@/components/audio/AudioUploader";
 import { Popover } from "@/components/ui/Popover";
 import { RenameMenuItem } from "@/components/ui/RenameMenuItem";
 import { Slider } from "@/components/ui/Slider";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { KebabIcon, PlusIcon, SpeakerOnIcon } from "@/components/ui/icons";
 import type { OneShotState } from "@/audio-engine";
 import type { AudioFileWithMeta, OneShotSlot } from "@/types/domain";
@@ -175,15 +176,17 @@ export function OneShotPad({
         <Popover
           panelClassName="w-48"
           trigger={({ open, toggle }) => (
-            <button
-              type="button"
-              onClick={toggle}
-              aria-expanded={open}
-              aria-label={`Alternativ för ${displayName}`}
-              className="focus-ring flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground/80 transition hover:bg-ink-700 hover:text-parchment-100"
-            >
-              <KebabIcon className="h-3 w-3" />
-            </button>
+            <Tooltip label="Alternativ" align="end">
+              <button
+                type="button"
+                onClick={toggle}
+                aria-expanded={open}
+                aria-label={`Alternativ för ${displayName}`}
+                className="focus-ring flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground/80 transition hover:bg-ink-700 hover:text-parchment-100"
+              >
+                <KebabIcon className="h-3 w-3" />
+              </button>
+            </Tooltip>
           )}
         >
           {({ close }) => (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { AUDIO_CATEGORIES, AUDIO_CATEGORY_LABELS, formatBytes } from "@/lib/audio/limits";
 import type { AudioCategory, AudioFileWithMeta, Collection } from "@/types/domain";
 import { AudioUploader } from "./AudioUploader";
@@ -172,14 +173,16 @@ export function LibraryClient() {
               >
                 {collection.name} ({collectionFileCounts.get(collection.id) ?? 0})
               </button>
-              <button
-                type="button"
-                onClick={() => void deleteCollection(collection.id)}
-                className="focus-ring rounded-full text-xs text-muted-foreground transition hover:text-danger-foreground"
-                aria-label={`Ta bort samlingen ${collection.name}`}
-              >
-                ×
-              </button>
+              <Tooltip label="Ta bort samling" placement="bottom" align="end">
+                <button
+                  type="button"
+                  onClick={() => void deleteCollection(collection.id)}
+                  className="focus-ring rounded-full text-xs text-muted-foreground transition hover:text-danger-foreground"
+                  aria-label={`Ta bort samlingen ${collection.name}`}
+                >
+                  ×
+                </button>
+              </Tooltip>
             </span>
           ))}
           {collections.length === 0 && (

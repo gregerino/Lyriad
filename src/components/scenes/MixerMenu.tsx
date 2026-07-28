@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 import { Popover } from "@/components/ui/Popover";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { RenameMenuItem } from "@/components/ui/RenameMenuItem";
 import { MixerIcon, ResetIcon, TrashIcon } from "@/components/ui/icons";
 import type { FadeCurve } from "@/audio-engine";
@@ -102,20 +103,21 @@ export function MixerMenu({
     <Popover
       panelClassName="w-80 max-w-[calc(100vw-2rem)]"
       trigger={({ open, toggle }) => (
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={open}
-          aria-label="Mixerinställningar"
-          title="Mixerinställningar"
-          className={`focus-ring flex h-9 w-9 items-center justify-center rounded-lg border transition ${
-            open
-              ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
-              : "border-border-strong text-muted-foreground hover:border-ember-400/40 hover:text-ember-300"
-          }`}
-        >
-          <MixerIcon className="h-4 w-4" />
-        </button>
+        <Tooltip label="Mixerinställningar" align="end">
+          <button
+            type="button"
+            onClick={toggle}
+            aria-expanded={open}
+            aria-label="Mixerinställningar"
+            className={`focus-ring flex h-9 w-9 items-center justify-center rounded-lg border transition ${
+              open
+                ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
+                : "border-border-strong text-muted-foreground hover:border-ember-400/40 hover:text-ember-300"
+            }`}
+          >
+            <MixerIcon className="h-4 w-4" />
+          </button>
+        </Tooltip>
       )}
     >
       {({ close }) => (

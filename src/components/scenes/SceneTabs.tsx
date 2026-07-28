@@ -58,7 +58,6 @@ export function SceneTabs({ currentSceneId, currentSceneName }: SceneTabsProps) 
       <Link
         href="/scenes"
         className="focus-ring flex-none rounded-full px-3 py-1.5 text-sm text-muted-foreground transition hover:text-parchment-200"
-        title="Alla scener"
       >
         Alla scener
       </Link>

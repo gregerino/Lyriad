@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# also the other way round — `vercel env pull prod.env` writes names like this,
+# which `.env*` does not match
+*.env
 
 # vercel
 .vercel

@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { LibraryIcon, MenuIcon, MixerIcon, ScenesIcon, XIcon } from "@/components/ui/icons";
 
 const NAV_ITEMS = [
@@ -31,15 +32,17 @@ export function AppHeader() {
     <>
       <header className="sticky top-0 z-40 border-b border-border bg-surface/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 sm:px-6">
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            aria-label="Öppna meny"
-            aria-expanded={open}
-            className="focus-ring flex h-9 w-9 flex-none items-center justify-center rounded-md text-parchment-300 transition hover:bg-surface-elevated hover:text-ember-300"
-          >
-            <MenuIcon className="h-5 w-5" />
-          </button>
+          <Tooltip label="Meny" placement="bottom" align="start" className="flex-none">
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              aria-label="Öppna meny"
+              aria-expanded={open}
+              className="focus-ring flex h-9 w-9 flex-none items-center justify-center rounded-md text-parchment-300 transition hover:bg-surface-elevated hover:text-ember-300"
+            >
+              <MenuIcon className="h-5 w-5" />
+            </button>
+          </Tooltip>
           <Link
             href="/"
             className="focus-ring flex items-center gap-2.5 rounded-sm font-display text-sm font-medium tracking-[0.2em] text-parchment-100 uppercase"
@@ -83,14 +86,16 @@ export function AppHeader() {
             />
             Lyriad
           </span>
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            aria-label="Stäng meny"
-            className="focus-ring flex h-8 w-8 items-center justify-center rounded-md text-parchment-400 transition hover:bg-surface-elevated hover:text-ember-300"
-          >
-            <XIcon className="h-4 w-4" />
-          </button>
+          <Tooltip label="Stäng" placement="bottom">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              aria-label="Stäng meny"
+              className="focus-ring flex h-8 w-8 items-center justify-center rounded-md text-parchment-400 transition hover:bg-surface-elevated hover:text-ember-300"
+            >
+              <XIcon className="h-4 w-4" />
+            </button>
+          </Tooltip>
         </div>
 
         {NAV_ITEMS.map((item) => {
