@@ -84,7 +84,12 @@ export function Popover({
         <div
           ref={panelRef}
           style={shift ? { transform: `translateX(${shift}px)` } : undefined}
-          className={`absolute z-40 mt-2 rounded-lg border border-border-strong bg-surface-elevated p-3 shadow-lg ${
+          // A panel taller than the window has the same problem as one wider
+          // than it, and the nudge above only handles the horizontal case — a
+          // slot picker opened from the bottom row of the desk would otherwise
+          // run its "upload" half off the bottom of the screen with no way to
+          // reach it. Panels shorter than this are untouched.
+          className={`absolute z-40 mt-2 max-h-[70vh] overflow-y-auto overscroll-contain rounded-lg border border-border-strong bg-surface-elevated p-3 shadow-lg ${
             align === "right" ? "right-0" : "left-0"
           } ${panelClassName ?? ""}`}
         >

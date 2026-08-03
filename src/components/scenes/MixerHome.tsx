@@ -1,15 +1,23 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AudioUploader } from "@/components/audio/AudioUploader";
 import { FavoriteScenesBar } from "@/components/scenes/FavoriteScenesBar";
-import { Slider } from "@/components/ui/Slider";
-import { PlayIcon, SpeakerOnIcon } from "@/components/ui/icons";
+import { LibraryIcon, ScenesIcon } from "@/components/ui/icons";
 
 const MUSIC_SLOT_COUNT = 10;
 const ONESHOT_SLOT_COUNT = 20;
 
+/**
+ * What "/" shows when there is no scene to fall back to. Deliberately not a
+ * greyed-out mixer: thirty disabled placeholders read as an app that failed to
+ * load rather than one waiting to be told what to build, and the dummy grid
+ * never matched the real desk's layout anyway. So it explains the two kinds of
+ * slot instead, which is the one thing a first-time scene doesn't say for
+ * itself, and gets out of the way.
+ */
 export function MixerHome() {
   const router = useRouter();
   const [name, setName] = useState("");
@@ -42,13 +50,16 @@ export function MixerHome() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-8 px-4 py-8 sm:px-6 sm:py-12">
+    <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-8 px-4 py-8 sm:px-6 sm:py-12">
       <div>
         <p className="font-mono text-xs uppercase tracking-[0.2em] text-ember-400">Lyriad</p>
         <h1 className="mt-1 font-display text-2xl font-medium tracking-wide text-parchment-100 sm:text-3xl">
           Mixer
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">Ingen scen laddad.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Ingen scen laddad. En scen är ett mixerbord för ett ställe eller ett
+          ögonblick i spelet — ge den ett namn så öppnas det direkt.
+        </p>
       </div>
 
       <FavoriteScenesBar />
@@ -58,6 +69,7 @@ export function MixerHome() {
         <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-start">
           <input
             type="text"
+            autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
@@ -88,6 +100,28 @@ export function MixerHome() {
         {error && <p className="mt-2 text-xs text-danger-foreground">{error}</p>}
       </div>
 
+      {/* The one thing a brand-new, empty scene can't explain about itself. */}
+      <section className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-lg border border-border bg-surface/60 p-4">
+          <h2 className="font-display text-base font-medium tracking-wide text-parchment-100">
+            {MUSIC_SLOT_COUNT} musikplatser
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Långa spår som ligger och går — stämning, väder, en kroglåt. Flera kan
+            spela samtidigt, med varsin volym, loop och in- och uttoning.
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-surface/60 p-4">
+          <h2 className="font-display text-base font-medium tracking-wide text-parchment-100">
+            {ONESHOT_SLOT_COUNT} one-shots
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Korta ljud du avfyrar i stunden — en dörr, ett åskslag, ett tärningskast.
+            De lägger sig ovanpå varandra och avbryter aldrig musiken.
+          </p>
+        </div>
+      </section>
+
       <section className="rounded-lg border border-border bg-surface p-4 shadow-xs">
         <button
           type="button"
@@ -107,76 +141,22 @@ export function MixerHome() {
         )}
       </section>
 
-      <section>
-        <div className="flex items-center justify-between">
-          <h2 className="font-display text-xl font-medium tracking-wide text-parchment-100">
-            Musik
-          </h2>
-          <span className="font-mono text-xs text-muted-foreground">0/{MUSIC_SLOT_COUNT} platser</span>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-4 rounded-lg border border-ember-500/25 bg-gradient-to-r from-ember-950/50 to-surface p-4 opacity-60 shadow-sm">
-          <button
-            type="button"
-            disabled
-            aria-label="Ingen scen laddad"
-            className="flex h-12 w-12 flex-none items-center justify-center rounded-full bg-gradient-to-b from-ember-400 to-ember-500 text-ink-950 shadow-glow-sm disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
-          >
-            <PlayIcon className="h-5 w-5 translate-x-0.5" />
-          </button>
-
-          <div className="min-w-max flex-none">
-            <p className="text-sm font-medium text-parchment-100">Master</p>
-            <p className="text-xs text-muted-foreground">Ingen scen laddad</p>
-          </div>
-
-          <div className="flex flex-1 items-center gap-3 sm:max-w-xs">
-            <SpeakerOnIcon className="h-4 w-4 flex-none text-muted-foreground" />
-            <Slider value={0} onChange={() => {}} disabled className="w-full" aria-label="Mastervolym" />
-            <span className="w-10 flex-none text-right font-mono text-xs text-muted-foreground">0%</span>
-          </div>
-        </div>
-
-        <div className="mt-3 grid grid-flow-col grid-cols-2 grid-rows-5 gap-3">
-          {Array.from({ length: MUSIC_SLOT_COUNT }, (_, i) => (
-            <div
-              key={i}
-              className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 opacity-50 shadow-xs"
-            >
-              <span className="font-mono text-xs text-muted-foreground">
-                {String(i + 1).padStart(2, "0")}
-              </span>
-              <p className="min-h-[2.25rem] text-xs text-muted-foreground">
-                Skapa en scen för att tilldela ljud
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <div className="flex items-center justify-between">
-          <h2 className="font-display text-xl font-medium tracking-wide text-parchment-100">
-            One-shots
-          </h2>
-          <span className="font-mono text-xs text-muted-foreground">
-            0/{ONESHOT_SLOT_COUNT} platser
-          </span>
-        </div>
-        <div className="mt-3 grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
-          {Array.from({ length: ONESHOT_SLOT_COUNT }, (_, i) => (
-            <div
-              key={i}
-              className="flex aspect-[3/2] flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-border-strong/70 p-2 text-center opacity-50"
-            >
-              <span className="text-[10px] font-medium text-muted-foreground">
-                {String(i + 1).padStart(2, "0")}
-              </span>
-              <span className="text-[10px] text-muted-foreground">Skapa en scen</span>
-            </div>
-          ))}
-        </div>
-      </section>
+      <nav aria-label="Vidare" className="flex flex-wrap gap-2">
+        <Link
+          href="/scenes"
+          className="focus-ring flex items-center gap-2 rounded-lg border border-border-strong px-3 py-2 text-sm text-parchment-200 transition hover:border-ember-400/40 hover:text-ember-300"
+        >
+          <ScenesIcon className="h-4 w-4 flex-none" />
+          Alla scener
+        </Link>
+        <Link
+          href="/library"
+          className="focus-ring flex items-center gap-2 rounded-lg border border-border-strong px-3 py-2 text-sm text-parchment-200 transition hover:border-ember-400/40 hover:text-ember-300"
+        >
+          <LibraryIcon className="h-4 w-4 flex-none" />
+          Ljudbibliotek
+        </Link>
+      </nav>
     </div>
   );
 }

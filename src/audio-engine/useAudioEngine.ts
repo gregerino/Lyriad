@@ -5,6 +5,12 @@ import { AudioEngine, type EngineState, type FadeCurve } from "./AudioEngine";
 
 const EMPTY_STATE: EngineState = { tracks: {}, oneShots: {}, masterVolume: 1, groups: {} };
 
+/**
+ * Long enough to read as a scene ending rather than as a dropout, short enough
+ * that leaving a scene still feels immediate.
+ */
+const TEARDOWN_FADE_MS = 400;
+
 export function useAudioEngine() {
   const [engine] = useState(() => new AudioEngine());
   const [state, setState] = useState<EngineState>(EMPTY_STATE);
@@ -13,7 +19,9 @@ export function useAudioEngine() {
     const unsubscribe = engine.subscribe(setState);
     return () => {
       unsubscribe();
-      engine.dispose();
+      // Navigating away unmounts the scene, which is the only thing that ends
+      // playback wholesale — so it fades out instead of cutting.
+      engine.disposeWithFade(TEARDOWN_FADE_MS);
     };
   }, [engine]);
 

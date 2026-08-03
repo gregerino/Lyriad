@@ -35,6 +35,87 @@ function slotLabel(slot: FreeSlot): string {
   return slot.kind === "music" ? `Musik ${slot.slotIndex}` : `One-shot ${slot.slotIndex}`;
 }
 
+/**
+ * Where a freshly uploaded file goes. An empty scene has thirty free slots, and
+ * offering all thirty as a wall of buttons asks the user to pick a number when
+ * what they meant was "the next one" — so the two next ones are the buttons,
+ * and picking a particular slot stays available as a list.
+ */
+function AssignStep({
+  audioFile,
+  freeSlots,
+  category,
+  onAssign,
+  onSkip,
+}: {
+  audioFile: AudioFile;
+  freeSlots: FreeSlot[];
+  /** When the uploader is locked to a category, only that kind is offered up front. */
+  category: AudioCategory | null;
+  onAssign: (slot: FreeSlot) => void;
+  onSkip: () => void;
+}) {
+  const firstMusic = freeSlots.find((s) => s.kind === "music");
+  const firstOneShot = freeSlots.find((s) => s.kind === "oneshot");
+
+  const quickSlots = (
+    category === "oneshot"
+      ? [firstOneShot]
+      : category === "music"
+        ? [firstMusic]
+        : [firstMusic, firstOneShot]
+  ).filter((slot): slot is FreeSlot => slot !== undefined);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm text-parchment-300">
+        <span className="font-medium text-parchment-100">{audioFile.filename}</span> laddades upp.
+        Tilldela en ledig plats i scenen?
+      </p>
+
+      <div className="flex flex-wrap gap-2">
+        {quickSlots.map((slot) => (
+          <button
+            key={`${slot.kind}-${slot.slotIndex}`}
+            type="button"
+            onClick={() => onAssign(slot)}
+            className="focus-ring rounded-md border border-border-strong bg-background px-3 py-1.5 text-xs text-parchment-100 transition hover:border-ember-400/60 hover:text-ember-300"
+          >
+            {slot.kind === "music" ? "Första lediga musikplats" : "Första lediga one-shot"}
+            <span className="ml-1.5 font-mono text-muted-foreground">{slot.slotIndex}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value=""
+          onChange={(e) => {
+            const chosen = freeSlots.find((s) => `${s.kind}-${s.slotIndex}` === e.target.value);
+            if (chosen) onAssign(chosen);
+          }}
+          aria-label="Välj en särskild plats"
+          className="focus-ring min-w-0 flex-1 rounded-md border border-border-strong bg-background px-2 py-1.5 text-xs text-parchment-100 focus:border-ember-400"
+        >
+          <option value="">Eller välj en särskild plats…</option>
+          {freeSlots.map((slot) => (
+            <option key={`${slot.kind}-${slot.slotIndex}`} value={`${slot.kind}-${slot.slotIndex}`}>
+              {slotLabel(slot)}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={onSkip}
+          className="focus-ring flex-none rounded-sm text-xs text-muted-foreground hover:text-parchment-100"
+        >
+          Hoppa över
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: AudioUploaderProps) {
   const [status, setStatus] = useState<Status>({ step: "idle" });
   const [dragActive, setDragActive] = useState(false);
@@ -243,31 +324,13 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
       )}
 
       {status.step === "assign" && (
-        <div className="flex flex-col gap-3">
-          <p className="text-sm text-parchment-300">
-            <span className="font-medium text-parchment-100">{status.audioFile.filename}</span>{" "}
-            laddades upp. Tilldela en ledig plats i scenen?
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {status.freeSlots.map((slot) => (
-              <button
-                key={`${slot.kind}-${slot.slotIndex}`}
-                type="button"
-                onClick={() => void handleAssign(status.audioFile, slot)}
-                className="focus-ring rounded-md border border-border-strong bg-background px-3 py-1.5 text-xs text-parchment-100 transition hover:border-ember-400/60 hover:text-ember-300"
-              >
-                {slotLabel(slot)}
-              </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            onClick={() => setStatus({ step: "done", audioFile: status.audioFile })}
-            className="focus-ring self-start rounded-sm text-xs text-muted-foreground hover:text-parchment-100"
-          >
-            Hoppa över
-          </button>
-        </div>
+        <AssignStep
+          audioFile={status.audioFile}
+          freeSlots={status.freeSlots}
+          category={effectiveCategory ?? null}
+          onAssign={(slot) => void handleAssign(status.audioFile, slot)}
+          onSkip={() => setStatus({ step: "done", audioFile: status.audioFile })}
+        />
       )}
 
       {status.step === "assigning" && (

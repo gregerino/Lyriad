@@ -293,7 +293,9 @@ function SceneRow({
           className={`focus-ring flex h-9 w-9 flex-none items-center justify-center rounded-md transition ${
             scene.favorite
               ? "text-ember-400 hover:text-ember-300"
-              : "text-muted-foreground/40 hover:text-ember-300"
+              // /40 landed around 2:1 against the panel — below the 3:1 a
+              // non-text control needs to be seen at all.
+              : "text-muted-foreground/60 hover:text-ember-300"
           }`}
         >
           <StarIcon className="h-4 w-4" filled={scene.favorite} />

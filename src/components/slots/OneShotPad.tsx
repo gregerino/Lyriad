@@ -4,12 +4,13 @@ import { useState } from "react";
 import { AudioUploader } from "@/components/audio/AudioUploader";
 import { Popover } from "@/components/ui/Popover";
 import { RenameMenuItem } from "@/components/ui/RenameMenuItem";
-import { Slider } from "@/components/ui/Slider";
 import { Tooltip } from "@/components/ui/Tooltip";
+import { VolumeSlider } from "@/components/ui/VolumeSlider";
 import { KebabIcon, PlusIcon, SpeakerOnIcon } from "@/components/ui/icons";
+import { stripExtension } from "@/lib/audio/limits";
 import type { OneShotState } from "@/audio-engine";
-import type { AudioFileWithMeta, OneShotSlot } from "@/types/domain";
-import { AudioFileSelect } from "./AudioFileSelect";
+import type { AudioFileWithMeta, Collection, OneShotSlot } from "@/types/domain";
+import { AudioFilePicker } from "./AudioFilePicker";
 import type { SlotLoadState } from "./types";
 
 const MENU_ITEM_CLASS =
@@ -19,6 +20,7 @@ type OneShotPadProps = {
   slot: OneShotSlot;
   file: AudioFileWithMeta | null;
   libraryFiles: AudioFileWithMeta[];
+  collections: Collection[];
   oneShot: OneShotState | undefined;
   loadState: SlotLoadState;
   assigning: boolean;
@@ -32,15 +34,11 @@ type OneShotPadProps = {
   onRename: (name: string | null) => void;
 };
 
-function shortName(filename: string | undefined): string {
-  if (!filename) return "Okänd fil";
-  return filename.replace(/\.[^./]+$/, "");
-}
-
 export function OneShotPad({
   slot,
   file,
   libraryFiles,
+  collections,
   oneShot,
   loadState,
   assigning,
@@ -57,7 +55,7 @@ export function OneShotPad({
   const isActive = Boolean(oneShot && oneShot.activeCount > 0);
 
   // What the pad reads when the slot carries no custom name of its own.
-  const fallbackName = shortName(file?.filename);
+  const fallbackName = file ? stripExtension(file.filename) : "Okänd fil";
   const displayName = slot.name ?? fallbackName;
 
   function commitName(next: string | null) {
@@ -79,7 +77,7 @@ export function OneShotPad({
         <Popover
           align="left"
           className="w-full"
-          panelClassName="w-72 max-w-[calc(100vw-2rem)]"
+          panelClassName="w-80 max-w-[calc(100vw-2rem)]"
           trigger={({ open, toggle }) => (
             <button
               type="button"
@@ -99,15 +97,15 @@ export function OneShotPad({
                   Från biblioteket
                 </h3>
                 <div className="mt-2">
-                  <AudioFileSelect
+                  <AudioFilePicker
                     files={libraryFiles}
+                    collections={collections}
+                    preferredCategory="oneshot"
                     disabled={assigning}
                     onSelect={(audioFileId) => {
                       onAssign(audioFileId);
                       close();
                     }}
-                    placeholder="Välj ljudfil…"
-                    className="focus-ring w-full rounded-md border border-border-strong bg-background px-2 py-1.5 text-xs text-parchment-100 focus:border-ember-400 disabled:opacity-40"
                   />
                 </div>
               </div>
@@ -129,7 +127,7 @@ export function OneShotPad({
           )}
         </Popover>
         {assignError && (
-          <p className="mt-1 text-center text-[10px] text-danger-foreground">{assignError}</p>
+          <p className="mt-1 text-center text-[11px] text-danger-foreground">{assignError}</p>
         )}
       </div>
     );
@@ -158,7 +156,7 @@ export function OneShotPad({
           {displayName}
         </span>
         {oneShot && oneShot.activeCount > 1 && (
-          <span className="absolute bottom-1.5 right-1.5 z-10 rounded-full bg-ember-400 px-1.5 text-[10px] font-semibold text-ink-950">
+          <span className="absolute bottom-1.5 right-1.5 z-10 rounded-full bg-ember-400 px-1.5 text-[11px] font-semibold text-ink-950">
             {oneShot.activeCount}
           </span>
         )}
@@ -172,7 +170,9 @@ export function OneShotPad({
         )}
       </button>
 
-      <div className="absolute right-1 top-1 z-20 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
+      {/* Rename, volume and clear all live behind this button — on a touch
+          screen, hiding it until hover hid the pad's entire menu for good. */}
+      <div className="hover-reveal absolute right-1 top-1 z-20 transition">
         <Popover
           panelClassName="w-48"
           trigger={({ open, toggle }) => (
@@ -200,15 +200,15 @@ export function OneShotPad({
               />
 
               {oneShot && (
-                <label className="flex items-center gap-2 text-xs text-parchment-200">
+                <div className="flex items-center gap-2 px-2 text-xs text-parchment-200">
                   <SpeakerOnIcon className="h-3.5 w-3.5 flex-none text-muted-foreground" />
-                  <Slider
+                  <VolumeSlider
                     value={oneShot.volume}
                     onChange={onVolumeChange}
                     className="w-full"
                     aria-label="Volym"
                   />
-                </label>
+                </div>
               )}
               {loadState.status === "error" && (
                 <button
@@ -236,12 +236,12 @@ export function OneShotPad({
       </div>
 
       {loadState.status === "loading" && (
-        <span className="pointer-events-none absolute bottom-1 left-3 z-10 text-[10px] text-muted-foreground">
+        <span className="pointer-events-none absolute bottom-1 left-3 z-10 text-[11px] text-muted-foreground">
           Laddar…
         </span>
       )}
       {loadState.status === "error" && (
-        <span className="pointer-events-none absolute bottom-1 left-3 z-10 text-[10px] text-danger-foreground">
+        <span className="pointer-events-none absolute bottom-1 left-3 z-10 text-[11px] text-danger-foreground">
           Fel
         </span>
       )}

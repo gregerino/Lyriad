@@ -11,9 +11,10 @@ import { SceneTabs } from "@/components/scenes/SceneTabs";
 import { MusicSlotCard } from "@/components/slots/MusicSlotCard";
 import { OneShotPad } from "@/components/slots/OneShotPad";
 import type { SlotLoadState } from "@/components/slots/types";
+import { NoticeBar, useNotice } from "@/components/ui/Notice";
 import { Popover } from "@/components/ui/Popover";
-import { Slider } from "@/components/ui/Slider";
 import { Tooltip } from "@/components/ui/Tooltip";
+import { VolumeSlider } from "@/components/ui/VolumeSlider";
 import {
   ChevronDownIcon,
   LibraryIcon,
@@ -24,8 +25,10 @@ import {
   UploadIcon,
 } from "@/components/ui/icons";
 import { LAST_SCENE_COOKIE } from "@/lib/lastScene";
+import { useStoredSetting } from "@/lib/useStoredSetting";
 import type {
   AudioFileWithMeta,
+  Collection,
   MixPreset,
   MusicSlot,
   OneShotSlot,
@@ -42,6 +45,16 @@ const FADE_DURATIONS_MS = [3000, 5000];
 /** What "Återställ ljud" puts the desk back to. Slots match the column default. */
 const DEFAULT_BUS_VOLUME = 1;
 const DEFAULT_SLOT_VOLUME = 0.8;
+
+/**
+ * Both of these are how the user likes to work rather than anything about a
+ * particular scene, so they follow the browser rather than the scene row.
+ */
+const FADE_SETTING_KEY = "lyriad:fade-duration-ms";
+const EMPTY_PADS_SETTING_KEY = "lyriad:show-empty-oneshots";
+
+/** How far down the page the mixer has to go before the compact transport takes over. */
+const APP_HEADER_HEIGHT_PX = 56;
 
 function replaceMusicSlot(scene: Scene, slot: MusicSlot): Scene {
   return {
@@ -62,8 +75,11 @@ type SceneClientProps = { sceneId: string };
 export function SceneClient({ sceneId }: SceneClientProps) {
   const router = useRouter();
 
+  const { notify, notice, dismiss } = useNotice();
+
   const [scene, setScene] = useState<Scene | null>(null);
   const [audioFiles, setAudioFiles] = useState<AudioFileWithMeta[]>([]);
+  const [collections, setCollections] = useState<Collection[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -77,7 +93,21 @@ export function SceneClient({ sceneId }: SceneClientProps) {
 
   const [collapsedColumns, setCollapsedColumns] = useState<Record<string, boolean>>({});
   /** Ticked fade length, applied to both directions of master play/pause. */
-  const [fadeDurationMs, setFadeDurationMs] = useState<number | null>(null);
+  const [fadeDurationMs, setFadeDurationMs] = useStoredSetting<number | null>(
+    FADE_SETTING_KEY,
+    null
+  );
+  /**
+   * Whether the pad grid shows all twenty slots or only what is filled. A scene
+   * with three sounds in it was otherwise seventeen dashed rectangles.
+   */
+  const [showEmptyPads, setShowEmptyPads] = useStoredSetting(EMPTY_PADS_SETTING_KEY, false);
+
+  /** True once the desk's own transport has scrolled out from under the header. */
+  const [transportOffscreen, setTransportOffscreen] = useState(false);
+  const compactTransportAnchors = useRef(new Set<Element>());
+  const mobileTransportRef = useRef<HTMLDivElement>(null);
+  const deskTransportRef = useRef<HTMLDivElement>(null);
 
   const [mixPresets, setMixPresets] = useState<MixPreset[]>([]);
   const [deletingPresetId, setDeletingPresetId] = useState<string | null>(null);
@@ -130,10 +160,11 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   async function fetchAll() {
     setLoadError(null);
     try {
-      const [sceneRes, filesRes, presetsRes] = await Promise.all([
+      const [sceneRes, filesRes, presetsRes, collectionsRes] = await Promise.all([
         fetch(`/api/scenes/${sceneId}`),
         fetch("/api/audio-files"),
         fetch(`/api/scenes/${sceneId}/mix-presets`),
+        fetch("/api/collections"),
       ]);
       if (sceneRes.status === 404) {
         setNotFound(true);
@@ -144,6 +175,12 @@ export function SceneClient({ sceneId }: SceneClientProps) {
       const { audioFiles: files } = await filesRes.json();
       setScene(sceneData);
       setAudioFiles(files);
+      // Only used to filter the slot pickers, so a failure here costs the
+      // picker its collection filter rather than the whole scene.
+      if (collectionsRes.ok) {
+        const { collections: cols } = await collectionsRes.json();
+        setCollections(cols);
+      }
       if (presetsRes.ok) {
         const { presets } = await presetsRes.json();
         setMixPresets(presets);
@@ -160,6 +197,44 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     void fetchAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchAll only depends on sceneId, which is stable for the component's lifetime (page.tsx keys on it)
   }, [sceneId]);
+
+  /**
+   * Watches whichever transport this breakpoint actually renders and reports
+   * when it has scrolled up past the app header. Both anchors are observed:
+   * the one belonging to the other breakpoint is `display: none`, which never
+   * reports a negative top, so exactly one of them can ever be "passed".
+   */
+  useEffect(() => {
+    const anchors = [mobileTransportRef.current, deskTransportRef.current].filter(
+      (el): el is HTMLDivElement => el !== null
+    );
+    if (anchors.length === 0) return;
+
+    const passed = compactTransportAnchors.current;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          // isIntersecting alone can't tell "scrolled above" from "still below
+          // the fold", and only the former should summon the compact bar.
+          if (!entry.isIntersecting && entry.boundingClientRect.top < 0) {
+            passed.add(entry.target);
+          } else {
+            passed.delete(entry.target);
+          }
+        }
+        setTransportOffscreen(passed.size > 0);
+      },
+      { rootMargin: `-${APP_HEADER_HEIGHT_PX}px 0px 0px 0px` }
+    );
+    for (const anchor of anchors) observer.observe(anchor);
+
+    return () => {
+      observer.disconnect();
+      passed.clear();
+    };
+    // The anchors only exist once the scene has rendered, so this has to re-run
+    // when it arrives — and again if the user navigates to a different one.
+  }, [scene?.id]);
 
   // Remembers the most recently opened scene so "/" can land back on its mixer view.
   useEffect(() => {
@@ -308,6 +383,24 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     }
   }
 
+  /**
+   * Applies an optimistic edit and, if the server refuses it, puts the old
+   * value back and says so. Everything on this desk saves itself as you touch
+   * it, which is only trustworthy if a save that didn't happen is visible —
+   * silently keeping a value the server rejected is the worst of both.
+   */
+  function persist(
+    run: () => Promise<{ ok: boolean; error?: string }>,
+    revert: () => void,
+    message: string
+  ) {
+    void run().then((result) => {
+      if (result.ok) return;
+      revert();
+      notify(result.error ?? message, { tone: "danger" });
+    });
+  }
+
   async function assignMusicSlot(slotIndex: number, audioFileId: string) {
     setMusicAssigning((prev) => ({ ...prev, [slotIndex]: true }));
     setMusicSlotErrors((prev) => ({ ...prev, [slotIndex]: null }));
@@ -329,10 +422,34 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     setMusicAssigning((prev) => ({ ...prev, [slotIndex]: false }));
   }
 
+  /**
+   * Clearing a slot throws away its sound, its name and its level in one click,
+   * from a menu item sitting a few pixels from "rename". An undo costs one
+   * PATCH to put back and spares every correct click the confirm dialog that
+   * would otherwise be the alternative.
+   */
   async function clearMusicSlot(slotIndex: number) {
+    const previous = scene?.musicSlots.find((s) => s.slotIndex === slotIndex);
     setMusicAssigning((prev) => ({ ...prev, [slotIndex]: true }));
     const result = await patchMusicSlot(slotIndex, { audioFileId: null, name: null });
-    if (result.ok) setMusicSlotErrors((prev) => ({ ...prev, [slotIndex]: null }));
+    if (result.ok) {
+      setMusicSlotErrors((prev) => ({ ...prev, [slotIndex]: null }));
+      if (previous?.audioFileId) {
+        notify(`Musikplats ${slotIndex} rensades.`, {
+          tone: "info",
+          action: {
+            label: "Ångra",
+            onAction: () =>
+              void patchMusicSlot(slotIndex, {
+                audioFileId: previous.audioFileId,
+                name: previous.name,
+                volume: previous.volume,
+                loop: previous.loop,
+              }),
+          },
+        });
+      }
+    }
     setMusicAssigning((prev) => ({ ...prev, [slotIndex]: false }));
   }
 
@@ -358,14 +475,32 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   }
 
   async function clearOneShotSlot(slotIndex: number) {
+    const previous = scene?.oneShotSlots.find((s) => s.slotIndex === slotIndex);
     setOneshotAssigning((prev) => ({ ...prev, [slotIndex]: true }));
     const result = await patchOneShotSlot(slotIndex, { audioFileId: null, name: null });
-    if (result.ok) setOneshotSlotErrors((prev) => ({ ...prev, [slotIndex]: null }));
+    if (result.ok) {
+      setOneshotSlotErrors((prev) => ({ ...prev, [slotIndex]: null }));
+      if (previous?.audioFileId) {
+        notify(`One-shot ${slotIndex} rensades.`, {
+          tone: "info",
+          action: {
+            label: "Ångra",
+            onAction: () =>
+              void patchOneShotSlot(slotIndex, {
+                audioFileId: previous.audioFileId,
+                name: previous.name,
+                volume: previous.volume,
+              }),
+          },
+        });
+      }
+    }
     setOneshotAssigning((prev) => ({ ...prev, [slotIndex]: false }));
   }
 
   function handleMusicVolume(slotIndex: number, volume: number) {
     const trackId = musicTrackId(slotIndex);
+    const previous = scene?.musicSlots.find((s) => s.slotIndex === slotIndex)?.volume;
     if (tracks[trackId]) setVolume(trackId, volume);
     setScene((prev) =>
       prev
@@ -375,7 +510,25 @@ export function SceneClient({ sceneId }: SceneClientProps) {
           })
         : prev
     );
-    schedulePersist(`music-volume-${slotIndex}`, () => void patchMusicSlot(slotIndex, { volume }));
+    schedulePersist(`music-volume-${slotIndex}`, () =>
+      persist(
+        () => patchMusicSlot(slotIndex, { volume }),
+        () => {
+          if (previous === undefined) return;
+          // The engine keeps what the user set — yanking a fader back mid-scene
+          // would be worse than the mismatch. Only the stored value goes back.
+          setScene((prev) =>
+            prev
+              ? replaceMusicSlot(prev, {
+                  ...prev.musicSlots.find((s) => s.slotIndex === slotIndex)!,
+                  volume: previous,
+                })
+              : prev
+          );
+        },
+        `Volymen för musikplats ${slotIndex} kunde inte sparas.`
+      )
+    );
   }
 
   function handleMusicLoop(slotIndex: number, loop: boolean) {
@@ -389,7 +542,21 @@ export function SceneClient({ sceneId }: SceneClientProps) {
           })
         : prev
     );
-    void patchMusicSlot(slotIndex, { loop });
+    persist(
+      () => patchMusicSlot(slotIndex, { loop }),
+      () => {
+        if (tracks[trackId]) setLoop(trackId, !loop);
+        setScene((prev) =>
+          prev
+            ? replaceMusicSlot(prev, {
+                ...prev.musicSlots.find((s) => s.slotIndex === slotIndex)!,
+                loop: !loop,
+              })
+            : prev
+        );
+      },
+      `Loopinställningen för musikplats ${slotIndex} kunde inte sparas.`
+    );
   }
 
   function toggleColumnLoop(slotIndexes: number[]) {
@@ -402,6 +569,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   }
 
   function handleMusicName(slotIndex: number, name: string | null) {
+    const previous = scene?.musicSlots.find((s) => s.slotIndex === slotIndex)?.name ?? null;
     setScene((prev) =>
       prev
         ? replaceMusicSlot(prev, {
@@ -410,7 +578,19 @@ export function SceneClient({ sceneId }: SceneClientProps) {
           })
         : prev
     );
-    void patchMusicSlot(slotIndex, { name });
+    persist(
+      () => patchMusicSlot(slotIndex, { name }),
+      () =>
+        setScene((prev) =>
+          prev
+            ? replaceMusicSlot(prev, {
+                ...prev.musicSlots.find((s) => s.slotIndex === slotIndex)!,
+                name: previous,
+              })
+            : prev
+        ),
+      "Namnet kunde inte sparas."
+    );
   }
 
   function handleMusicMute(slotIndex: number, muted: boolean) {
@@ -425,6 +605,18 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     else play(trackId);
   }
 
+  /**
+   * What a slot's own transport button does. Settles on pause, matching the
+   * master row: the playhead survives, so pressing play again picks the track
+   * up where it was rather than restarting it from the top.
+   */
+  function pauseMusic(slotIndex: number) {
+    const trackId = musicTrackId(slotIndex);
+    if (fadeDurationMs) fadeOut(trackId, fadeDurationMs, { then: "pause" });
+    else pause(trackId);
+  }
+
+  /** The deliberate version, from the slot's menu: silence and rewind. */
   function stopMusic(slotIndex: number) {
     const trackId = musicTrackId(slotIndex);
     if (fadeDurationMs) fadeOut(trackId, fadeDurationMs, { then: "stop" });
@@ -455,6 +647,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
 
   function handleOneShotVolume(slotIndex: number, volume: number) {
     const trackId = oneshotTrackId(slotIndex);
+    const previous = scene?.oneShotSlots.find((s) => s.slotIndex === slotIndex)?.volume;
     if (oneShots[trackId]) setOneShotVolume(trackId, volume);
     setScene((prev) =>
       prev
@@ -465,7 +658,21 @@ export function SceneClient({ sceneId }: SceneClientProps) {
         : prev
     );
     schedulePersist(`oneshot-volume-${slotIndex}`, () =>
-      void patchOneShotSlot(slotIndex, { volume })
+      persist(
+        () => patchOneShotSlot(slotIndex, { volume }),
+        () => {
+          if (previous === undefined) return;
+          setScene((prev) =>
+            prev
+              ? replaceOneShotSlot(prev, {
+                  ...prev.oneShotSlots.find((s) => s.slotIndex === slotIndex)!,
+                  volume: previous,
+                })
+              : prev
+          );
+        },
+        `Volymen för one-shot ${slotIndex} kunde inte sparas.`
+      )
     );
   }
 
@@ -531,6 +738,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   }
 
   function handleOneShotName(slotIndex: number, name: string | null) {
+    const previous = scene?.oneShotSlots.find((s) => s.slotIndex === slotIndex)?.name ?? null;
     setScene((prev) =>
       prev
         ? replaceOneShotSlot(prev, {
@@ -539,7 +747,19 @@ export function SceneClient({ sceneId }: SceneClientProps) {
           })
         : prev
     );
-    void patchOneShotSlot(slotIndex, { name });
+    persist(
+      () => patchOneShotSlot(slotIndex, { name }),
+      () =>
+        setScene((prev) =>
+          prev
+            ? replaceOneShotSlot(prev, {
+                ...prev.oneShotSlots.find((s) => s.slotIndex === slotIndex)!,
+                name: previous,
+              })
+            : prev
+        ),
+      "Namnet kunde inte sparas."
+    );
   }
 
   function applyMixPreset(preset: MixPreset) {
@@ -641,14 +861,25 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   const anyMusicPlaying = loadedMusicTrackIds.some(
     (s) => tracks[musicTrackId(s.slotIndex)]?.isPlaying
   );
-  const filledOneShotCount = scene.oneShotSlots.filter((s) => s.audioFileId).length;
+  const transportStatus =
+    loadedMusicTrackIds.length === 0 ? "Inga spår laddade" : anyMusicPlaying ? "Spelar" : "Pausad";
+
+  const filledOneShots = scene.oneShotSlots.filter((s) => s.audioFileId);
+  const firstFreeOneShot = scene.oneShotSlots.find((s) => !s.audioFileId);
+  // Collapsed, the grid shows what is filled plus one way in — twenty dashed
+  // rectangles is a lot of nothing to look at on a scene with three sounds.
+  const visibleOneShots = showEmptyPads
+    ? scene.oneShotSlots
+    : [...filledOneShots, ...(firstFreeOneShot ? [firstFreeOneShot] : [])];
+  // Named for what they are rather than where they sit: below `sm` the two
+  // columns stack, at which point "the left one" is describing nothing.
   const musicColumns = [
     {
       id: "left",
-      label: "Vänsterkolumnen",
+      label: "Musikbuss A",
       slots: scene.musicSlots.slice(0, MUSIC_COLUMN_SIZE),
     },
-    { id: "right", label: "Högerkolumnen", slots: scene.musicSlots.slice(MUSIC_COLUMN_SIZE) },
+    { id: "right", label: "Musikbuss B", slots: scene.musicSlots.slice(MUSIC_COLUMN_SIZE) },
   ];
 
   function renderMusicColumn(column: { id: string; label: string; slots: MusicSlot[] }) {
@@ -659,12 +890,13 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     return (
       <div key={column.id} className="flex min-w-0 flex-col gap-3">
         <div className="flex items-center gap-2 px-1">
+          <h3 className="sr-only">{column.label}</h3>
           <SpeakerOnIcon className="h-3.5 w-3.5 flex-none text-muted-foreground" />
-          <Slider
+          <VolumeSlider
             value={busVolume}
             onChange={(v) => setGroupVolume(column.id, v)}
             className="w-full"
-            aria-label={`Bussvolym för ${column.label.toLowerCase()}`}
+            aria-label={`Bussvolym för ${column.label}`}
           />
           <Tooltip label={allLooping ? "Loop på" : "Loop av"} align="end" className="flex-none">
             <button
@@ -673,8 +905,8 @@ export function SceneClient({ sceneId }: SceneClientProps) {
               aria-pressed={allLooping}
               aria-label={
                 allLooping
-                  ? `Stäng av loop för ${column.label.toLowerCase()}`
-                  : `Loopa ${column.label.toLowerCase()}`
+                  ? `Stäng av loop för ${column.label}`
+                  : `Loopa ${column.label}`
               }
               className={`focus-ring flex h-7 w-7 flex-none items-center justify-center rounded-md transition ${
                 allLooping
@@ -692,11 +924,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                 setCollapsedColumns((prev) => ({ ...prev, [column.id]: !isCollapsed }))
               }
               aria-expanded={!isCollapsed}
-              aria-label={
-                isCollapsed
-                  ? `Visa ${column.label.toLowerCase()}`
-                  : `Dölj ${column.label.toLowerCase()}`
-              }
+              aria-label={isCollapsed ? `Visa ${column.label}` : `Dölj ${column.label}`}
               className="focus-ring flex h-7 w-7 flex-none items-center justify-center rounded-md text-muted-foreground transition hover:text-parchment-100"
             >
               <ChevronDownIcon className={`h-4 w-4 transition ${isCollapsed ? "" : "rotate-180"}`} />
@@ -712,6 +940,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                 slot={slot}
                 file={slot.audioFileId ? (audioFilesById.get(slot.audioFileId) ?? null) : null}
                 libraryFiles={musicLibraryFiles}
+                collections={collections}
                 track={tracks[musicTrackId(slot.slotIndex)]}
                 loadState={musicLoadState[slot.slotIndex] ?? { status: "idle" }}
                 assigning={musicAssigning[slot.slotIndex] ?? false}
@@ -723,6 +952,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                     void loadMusicAudio(slot.slotIndex, slot.audioFileId, slot.volume);
                 }}
                 onPlay={() => startMusic(slot.slotIndex)}
+                onPause={() => pauseMusic(slot.slotIndex)}
                 onStop={() => stopMusic(slot.slotIndex)}
                 onSeek={(position) => seek(musicTrackId(slot.slotIndex), position)}
                 getPosition={getPosition}
@@ -819,7 +1049,10 @@ export function SceneClient({ sceneId }: SceneClientProps) {
 
       {/* Below the artwork breakpoint the master controls need a home of their own,
           since the centre column (and its orb) only exists from lg up. */}
-      <div className="mt-5 flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2 lg:hidden">
+      <div
+        ref={mobileTransportRef}
+        className="mt-5 flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2 lg:hidden"
+      >
         <Tooltip
           label={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
           className="flex-none"
@@ -838,15 +1071,9 @@ export function SceneClient({ sceneId }: SceneClientProps) {
             )}
           </button>
         </Tooltip>
-        <span className="flex-none text-xs text-muted-foreground">
-          {loadedMusicTrackIds.length === 0
-            ? "Inga spår laddade"
-            : anyMusicPlaying
-              ? "Spelar"
-              : "Pausad"}
-        </span>
+        <span className="flex-none text-xs text-muted-foreground">{transportStatus}</span>
         <SpeakerOnIcon className="ml-auto h-3.5 w-3.5 flex-none text-muted-foreground" />
-        <Slider
+        <VolumeSlider
           value={masterVolume}
           onChange={setMasterVolume}
           className="w-full max-w-[14rem]"
@@ -854,16 +1081,68 @@ export function SceneClient({ sceneId }: SceneClientProps) {
         />
       </div>
 
+      {/* The desk is taller than any screen it runs on, and the master transport
+          lives at the top of it — so once it scrolls away, a compact stand-in
+          takes over rather than leaving the one-shots with no way to stop the
+          music. Fixed under the app header, which owns the top 56px. */}
+      <div
+        aria-hidden={!transportOffscreen}
+        inert={!transportOffscreen}
+        className={`fixed inset-x-0 top-14 z-30 px-4 transition-opacity duration-200 sm:px-6 ${
+          transportOffscreen ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+      >
+        <div className="mx-auto flex w-full max-w-[100rem] items-center gap-3 rounded-xl border border-border bg-surface/95 px-3 py-2 shadow-lg backdrop-blur">
+          <Tooltip
+            label={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
+            placement="bottom"
+            align="start"
+            className="flex-none"
+          >
+            <button
+              type="button"
+              onClick={toggleMasterPlayback}
+              disabled={loadedMusicTrackIds.length === 0}
+              aria-label={anyMusicPlaying ? "Pausa all musik" : "Spela all musik"}
+              className="focus-ring flex h-9 w-9 flex-none items-center justify-center rounded-full bg-gradient-to-b from-ember-400 to-ember-500 text-ink-950 shadow-glow-sm transition hover:shadow-glow disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
+            >
+              {anyMusicPlaying ? (
+                <PauseIcon className="h-4 w-4" />
+              ) : (
+                <PlayIcon className="h-4 w-4 translate-x-0.5" />
+              )}
+            </button>
+          </Tooltip>
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            <span className="text-parchment-200">{scene.name}</span>
+            <span className="mx-1.5">·</span>
+            {transportStatus}
+          </span>
+          <SpeakerOnIcon className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+          <VolumeSlider
+            value={masterVolume}
+            onChange={setMasterVolume}
+            className="w-full max-w-[10rem] flex-none"
+            aria-label="Mastervolym"
+          />
+        </div>
+      </div>
+
       {/* Two slot columns from tablet width up (iPad portrait is 768–834px). The
           centre column is desktop-only: on a tablet that width is worth more to
           the slots than to the artwork. */}
+      {/* The music half of the desk carries no visible heading — the two bus
+          faders are self-evident on screen — but without one there is no way
+          to find it, or tell it from the one-shots, by structure alone. */}
+      <h2 className="sr-only">Musik</h2>
+
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,16rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,20rem)_minmax(0,1fr)]">
         {renderMusicColumn(musicColumns[0])}
 
         <div className="hidden flex-col items-center gap-4 lg:flex">
           <div className="flex w-full items-center gap-2 px-1">
             <SpeakerOnIcon className="h-3.5 w-3.5 flex-none text-muted-foreground" />
-            <Slider
+            <VolumeSlider
               value={masterVolume}
               onChange={setMasterVolume}
               className="w-full"
@@ -889,14 +1168,9 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                 )}
               </button>
             </Tooltip>
-            <p className="text-xs text-muted-foreground">
-              {loadedMusicTrackIds.length === 0
-                ? "Inga spår laddade"
-                : anyMusicPlaying
-                  ? "Spelar"
-                  : "Pausad"}
-            </p>
+            <p className="text-xs text-muted-foreground">{transportStatus}</p>
           </div>
+          <div ref={deskTransportRef} aria-hidden="true" />
         </div>
 
         {renderMusicColumn(musicColumns[1])}
@@ -908,12 +1182,12 @@ export function SceneClient({ sceneId }: SceneClientProps) {
             One-shots
           </h2>
           <span className="flex-none font-mono text-xs text-muted-foreground">
-            {filledOneShotCount}/{scene.oneShotSlots.length}
+            {filledOneShots.length}/{scene.oneShotSlots.length}
           </span>
 
           <div className="flex min-w-0 flex-1 items-center justify-center gap-2 sm:max-w-xs">
             <SpeakerOnIcon className="h-3.5 w-3.5 flex-none text-muted-foreground" />
-            <Slider
+            <VolumeSlider
               value={oneShotBusVolume}
               onChange={(v) => setGroupVolume(ONESHOT_GROUP_ID, v)}
               className="w-full"
@@ -922,6 +1196,16 @@ export function SceneClient({ sceneId }: SceneClientProps) {
           </div>
 
           <div className="flex flex-none items-center gap-2">
+            {/* Always offered, even on an empty scene: with the grid collapsed
+                to a single "+" there has to be a visible way to see the rest. */}
+            <button
+              type="button"
+              onClick={() => setShowEmptyPads(!showEmptyPads)}
+              aria-pressed={showEmptyPads}
+              className="focus-ring rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:text-ember-300"
+            >
+              {showEmptyPads ? "Dölj tomma platser" : "Visa alla platser"}
+            </button>
             <Tooltip label="Ljudbibliotek" align="end">
               <Link
                 href="/library"
@@ -962,12 +1246,13 @@ export function SceneClient({ sceneId }: SceneClientProps) {
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-10">
-          {scene.oneShotSlots.map((slot) => (
+          {visibleOneShots.map((slot) => (
             <OneShotPad
               key={slot.slotIndex}
               slot={slot}
               file={slot.audioFileId ? (audioFilesById.get(slot.audioFileId) ?? null) : null}
               libraryFiles={oneshotLibraryFiles}
+              collections={collections}
               oneShot={oneShots[oneshotTrackId(slot.slotIndex)]}
               loadState={oneshotLoadState[slot.slotIndex] ?? { status: "idle" }}
               assigning={oneshotAssigning[slot.slotIndex] ?? false}
@@ -986,6 +1271,8 @@ export function SceneClient({ sceneId }: SceneClientProps) {
           ))}
         </div>
       </section>
+
+      <NoticeBar notice={notice} onDismiss={dismiss} />
     </div>
   );
 }

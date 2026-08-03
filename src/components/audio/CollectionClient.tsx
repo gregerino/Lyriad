@@ -306,7 +306,7 @@ export function CollectionClient({ collectionId }: CollectionClientProps) {
                   type="button"
                   onClick={() => void setMembers({ remove: [file.id] })}
                   aria-label={`Ta bort ${file.filename} från ${collection.name}`}
-                  className="focus-ring flex-none rounded-full text-muted-foreground/80 opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 hover:text-wine-400"
+                  className="hover-reveal focus-ring flex-none rounded-full text-muted-foreground/80 transition hover:text-wine-400"
                 >
                   <XIcon className="h-4 w-4" />
                 </button>
@@ -359,7 +359,7 @@ function CollectionMenu({
 
       {editingCategory ? (
         <label className="flex flex-col gap-1 px-1 py-1">
-          <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+          <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-muted-foreground">
             Kategori
           </span>
           <input

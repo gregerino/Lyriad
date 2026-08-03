@@ -6,19 +6,21 @@ import { Popover } from "@/components/ui/Popover";
 import { RenameMenuItem } from "@/components/ui/RenameMenuItem";
 import { Slider } from "@/components/ui/Slider";
 import { Tooltip } from "@/components/ui/Tooltip";
+import { VolumeSlider } from "@/components/ui/VolumeSlider";
 import {
   KebabIcon,
   LoopIcon,
+  PauseIcon,
   PlayIcon,
   PlusIcon,
   SpeakerOffIcon,
   SpeakerOnIcon,
   StopIcon,
 } from "@/components/ui/icons";
-import { formatDuration } from "@/lib/audio/limits";
+import { formatDuration, stripExtension } from "@/lib/audio/limits";
 import type { TrackState } from "@/audio-engine";
-import type { AudioFileWithMeta, MusicSlot } from "@/types/domain";
-import { AudioFileSelect } from "./AudioFileSelect";
+import type { AudioFileWithMeta, Collection, MusicSlot } from "@/types/domain";
+import { AudioFilePicker } from "./AudioFilePicker";
 import type { SlotLoadState } from "./types";
 
 /**
@@ -32,6 +34,7 @@ type MusicSlotCardProps = {
   slot: MusicSlot;
   file: AudioFileWithMeta | null;
   libraryFiles: AudioFileWithMeta[];
+  collections: Collection[];
   track: TrackState | undefined;
   loadState: SlotLoadState;
   assigning: boolean;
@@ -40,6 +43,9 @@ type MusicSlotCardProps = {
   onClear: () => void;
   onRetry: () => void;
   onPlay: () => void;
+  /** Holds the playhead where it is — what the card's own transport button does. */
+  onPause: () => void;
+  /** Winds the track back to the start; lives in the menu, not on the button. */
   onStop: () => void;
   onSeek: (positionSeconds: number) => void;
   /** Must be referentially stable — it drives the playhead's polling effect. */
@@ -57,6 +63,7 @@ export function MusicSlotCard({
   slot,
   file,
   libraryFiles,
+  collections,
   track,
   loadState,
   assigning,
@@ -65,6 +72,7 @@ export function MusicSlotCard({
   onClear,
   onRetry,
   onPlay,
+  onPause,
   onStop,
   onSeek,
   getPosition,
@@ -74,8 +82,10 @@ export function MusicSlotCard({
   onRename,
 }: MusicSlotCardProps) {
   const ready = Boolean(slot.audioFileId) && loadState.status === "loaded" && Boolean(track);
-  // What the card reads when the slot carries no custom name of its own.
-  const fallbackName = file?.filename ?? "Okänd fil";
+  // What the card reads when the slot carries no custom name of its own. The
+  // extension is dropped here as it is on a one-shot pad: ten cards ending in
+  // ".mp3" spend a tenth of the row on the same four characters.
+  const fallbackName = file ? stripExtension(file.filename) : "Okänd fil";
   const resolvedName = slot.name ?? fallbackName;
 
   // Playhead, in seconds. `scrubTo` holds the value being dragged so the poll
@@ -115,7 +125,7 @@ export function MusicSlotCard({
         <Popover
           align="left"
           className="w-full"
-          panelClassName="w-72 max-w-[calc(100vw-2rem)]"
+          panelClassName="w-80 max-w-[calc(100vw-2rem)]"
           trigger={({ open, toggle }) => (
             <button
               type="button"
@@ -138,15 +148,15 @@ export function MusicSlotCard({
                   Från biblioteket
                 </h3>
                 <div className="mt-2">
-                  <AudioFileSelect
+                  <AudioFilePicker
                     files={libraryFiles}
+                    collections={collections}
+                    preferredCategory="music"
                     disabled={assigning}
                     onSelect={(audioFileId) => {
                       onAssign(audioFileId);
                       close();
                     }}
-                    placeholder="Välj ljudfil…"
-                    className="focus-ring w-full rounded-md border border-border-strong bg-background px-2 py-1.5 text-xs text-parchment-100 focus:border-ember-400 disabled:opacity-40"
                   />
                 </div>
               </div>
@@ -171,10 +181,10 @@ export function MusicSlotCard({
           )}
         </Popover>
         {assigning && (
-          <p className="px-3 pb-2 text-center text-[10px] text-muted-foreground">Tilldelar…</p>
+          <p className="px-3 pb-2 text-center text-[11px] text-muted-foreground">Tilldelar…</p>
         )}
         {assignError && (
-          <p className="px-3 pb-2 text-center text-[10px] text-danger-foreground">{assignError}</p>
+          <p className="px-3 pb-2 text-center text-[11px] text-danger-foreground">{assignError}</p>
         )}
       </div>
     );
@@ -186,12 +196,15 @@ export function MusicSlotCard({
   return (
     <div className="rounded-xl border border-border bg-surface px-3 py-2.5 shadow-xs transition hover:border-border-strong">
       <div className="flex items-start gap-3">
-        <Tooltip label={isPlaying ? "Stoppa" : "Spela"} className="flex-none">
+        {/* Pause, not stop: the master transport already treats a halt as
+            something you resume from, and losing a six-minute track's position
+            to a mis-click is a worse default than the menu's explicit stop. */}
+        <Tooltip label={isPlaying ? "Pausa" : "Spela"} className="flex-none">
           <button
             type="button"
-            onClick={() => (isPlaying ? onStop() : onPlay())}
+            onClick={() => (isPlaying ? onPause() : onPlay())}
             disabled={!ready}
-            aria-label={isPlaying ? `Stoppa ${resolvedName}` : `Spela ${resolvedName}`}
+            aria-label={isPlaying ? `Pausa ${resolvedName}` : `Spela ${resolvedName}`}
             className={`focus-ring group relative flex h-10 w-10 flex-none items-center justify-center overflow-hidden rounded-md border transition disabled:cursor-not-allowed disabled:opacity-40 ${
               isPlaying
                 ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
@@ -199,7 +212,7 @@ export function MusicSlotCard({
             }`}
           >
             {isPlaying ? (
-              <StopIcon className="h-3.5 w-3.5" />
+              <PauseIcon className="h-3.5 w-3.5" />
             ) : (
               <PlayIcon className="h-3.5 w-3.5 translate-x-0.5" />
             )}
@@ -242,6 +255,18 @@ export function MusicSlotCard({
                   />
                   <button
                     type="button"
+                    onClick={() => {
+                      onStop();
+                      close();
+                    }}
+                    disabled={!isPlaying}
+                    className={`${MENU_ITEM_CLASS} disabled:opacity-40`}
+                  >
+                    <StopIcon className="h-3.5 w-3.5" />
+                    Stoppa och spola tillbaka
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => onLoopChange(!track?.loop)}
                     aria-pressed={track?.loop ?? false}
                     className={`${MENU_ITEM_CLASS} ${track?.loop ? "text-ember-300" : ""}`}
@@ -279,9 +304,9 @@ export function MusicSlotCard({
             </Popover>
           </div>
 
-          <div className="mt-1 flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <SpeakerOnIcon className="h-3 w-3 flex-none text-muted-foreground" />
-            <Slider
+            <VolumeSlider
               value={track ? track.volume : slot.volume}
               onChange={onVolumeChange}
               className="w-full max-w-[55%]"
@@ -307,8 +332,10 @@ export function MusicSlotCard({
         </div>
       )}
 
+      {/* The two faders now stand 24px tall apiece for the sake of a fingertip,
+          so the gaps around them come back down to keep the card its old size. */}
       {ready && track && (
-        <div className="mt-2 flex items-center gap-2">
+        <div className="mt-1 flex items-center gap-2">
           <Slider
             value={Math.round(displayPosition)}
             min={0}

@@ -38,6 +38,14 @@ export function isAllowedAudioFilename(filename: string): boolean {
   return isAllowedExtension(getFileExtension(filename));
 }
 
+/**
+ * A filename as a slot label: the extension carries nothing at a glance, and
+ * ".mp3" repeated across ten cards is ten times the same word.
+ */
+export function stripExtension(filename: string): string {
+  return filename.replace(/\.[^./]+$/, "");
+}
+
 export function formatDuration(seconds: number): string {
   const total = Math.max(0, Math.round(seconds));
   const h = Math.floor(total / 3600);

@@ -80,7 +80,7 @@ function NameField({
 
   return (
     <label className="flex flex-col gap-1">
-      <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+      <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-muted-foreground">
         Namn
       </span>
       <input

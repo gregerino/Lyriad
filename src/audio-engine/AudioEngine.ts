@@ -102,6 +102,8 @@ export class AudioEngine {
    */
   private groups = new Map<string, { gainNode: GainNode | null; volume: number }>();
   private listeners = new Set<Listener>();
+  /** Set while disposeWithFade's ramp is running; see subscribe(). */
+  private pendingDisposeTimer: ReturnType<typeof setTimeout> | null = null;
 
   private ensureContext(): AudioContext {
     if (!this.audioContext) {
@@ -172,6 +174,18 @@ export class AudioEngine {
   }
 
   subscribe(listener: Listener): () => void {
+    // A new subscriber means the engine is wanted after all — React's
+    // development double-mount unsubscribes and resubscribes the same engine,
+    // and a teardown scheduled in between would land on a live one.
+    if (this.pendingDisposeTimer !== null) {
+      clearTimeout(this.pendingDisposeTimer);
+      this.pendingDisposeTimer = null;
+      for (const track of this.tracks.values()) {
+        this.clearFadeTimer(track);
+        track.fadeGain = 1;
+        this.applyTrackVolume(track);
+      }
+    }
     this.listeners.add(listener);
     listener(this.getState());
     return () => this.listeners.delete(listener);
@@ -602,7 +616,43 @@ export class AudioEngine {
     this.notify();
   }
 
+  /**
+   * Fades everything currently playing down to silence over `durationMs` and
+   * then tears the engine down. For the case the plain `dispose()` handles
+   * badly: leaving a scene mid-session cuts every track off in the same frame,
+   * which at the table sounds like the app crashed rather than like a scene
+   * change.
+   *
+   * Detached from the caller on purpose — whoever navigates away is already
+   * unmounting and can't await this. The elements and nodes being ramped are
+   * held by this engine alone, so they stay alive until the ramp lands.
+   */
+  disposeWithFade(durationMs: number): void {
+    const playing = [...this.tracks.values()].filter((track) => !track.element.paused);
+    if (playing.length === 0 || durationMs <= 0) {
+      this.dispose();
+      return;
+    }
+
+    // Listeners go first: the React tree that owned them is on its way out, and
+    // notifying it from a timer after unmount is a state update to nothing.
+    this.listeners.clear();
+    for (const track of playing) {
+      this.rampFade(track, 0, durationMs, "linear");
+    }
+    // One timer for the lot rather than a callback per track, so disposal
+    // happens exactly once no matter how many ramps are in flight.
+    this.pendingDisposeTimer = setTimeout(() => {
+      this.pendingDisposeTimer = null;
+      this.dispose();
+    }, durationMs);
+  }
+
   dispose(): void {
+    if (this.pendingDisposeTimer !== null) {
+      clearTimeout(this.pendingDisposeTimer);
+      this.pendingDisposeTimer = null;
+    }
     for (const id of [...this.tracks.keys()]) this.removeTrack(id);
     for (const id of [...this.oneShots.keys()]) this.removeOneShotSlot(id);
     for (const group of this.groups.values()) group.gainNode?.disconnect();

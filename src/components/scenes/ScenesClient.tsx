@@ -226,10 +226,10 @@ export function ScenesClient() {
                       aria-label={
                         scene.favorite ? `Ta bort ${scene.name} som favorit` : `Gör ${scene.name} till favorit`
                       }
-                      className={`focus-ring flex-none rounded-full transition focus-visible:opacity-100 ${
+                      className={`focus-ring flex-none rounded-full transition ${
                         scene.favorite
                           ? "text-ember-400 hover:text-ember-300"
-                          : "text-muted-foreground/60 opacity-0 group-hover:opacity-100 hover:text-ember-300"
+                          : "hover-reveal text-muted-foreground/60 hover:text-ember-300"
                       }`}
                     >
                       <StarIcon className="h-4 w-4" filled={scene.favorite} />
@@ -241,7 +241,7 @@ export function ScenesClient() {
                       onClick={(e) => void deleteScene(e, scene.id)}
                       disabled={deletingId === scene.id}
                       aria-label={`Ta bort ${scene.name}`}
-                      className="focus-ring flex-none rounded-full text-muted-foreground/80 opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 hover:text-wine-400 disabled:opacity-40"
+                      className="hover-reveal focus-ring flex-none rounded-full text-muted-foreground/80 transition hover:text-wine-400 disabled:opacity-40"
                     >
                       <XIcon className="h-4 w-4" />
                     </button>
