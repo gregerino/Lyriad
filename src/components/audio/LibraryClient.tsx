@@ -1,12 +1,24 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { AudioFileList } from "@/components/audio/AudioFileList";
+import { AudioUploader } from "@/components/audio/AudioUploader";
+import { CollectionArtwork } from "@/components/audio/CollectionArtwork";
+import { CardCarousel } from "@/components/ui/CardCarousel";
+import { Popover } from "@/components/ui/Popover";
 import { Tooltip } from "@/components/ui/Tooltip";
-import { AUDIO_CATEGORIES, AUDIO_CATEGORY_LABELS, formatBytes } from "@/lib/audio/limits";
-import type { AudioCategory, AudioFileWithMeta, Collection } from "@/types/domain";
-import { AudioUploader } from "./AudioUploader";
+import { PlusIcon, UploadIcon } from "@/components/ui/icons";
+import type { AudioFileWithMeta, Collection } from "@/types/domain";
 
-type CategoryFilter = "all" | AudioCategory;
+/** Stands in for "no category" as a map key — collections may have none. */
+const UNCATEGORISED = "__utan_kategori__";
+
+type CollectionGroup = {
+  key: string;
+  label: string;
+  collections: Collection[];
+};
 
 export function LibraryClient() {
   const [audioFiles, setAudioFiles] = useState<AudioFileWithMeta[]>([]);
@@ -14,13 +26,7 @@ export function LibraryClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
-  const [collectionFilter, setCollectionFilter] = useState<string>("all");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  const [newCollectionName, setNewCollectionName] = useState("");
-  const [bulkTargetCollection, setBulkTargetCollection] = useState<string>("");
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
   async function loadAll() {
     setError(null);
@@ -46,21 +52,7 @@ export function LibraryClient() {
     void loadAll();
   }, []);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return audioFiles.filter((file) => {
-      if (categoryFilter !== "all" && file.category !== categoryFilter) return false;
-      if (collectionFilter !== "all" && !file.collectionIds.includes(collectionFilter)) {
-        return false;
-      }
-      if (q && !file.filename.toLowerCase().includes(q)) return false;
-      return true;
-    });
-  }, [audioFiles, search, categoryFilter, collectionFilter]);
-
-  const isFiltered = search.trim() !== "" || categoryFilter !== "all" || collectionFilter !== "all";
-
-  const collectionFileCounts = useMemo(() => {
+  const fileCountByCollection = useMemo(() => {
     const counts = new Map<string, number>();
     for (const file of audioFiles) {
       for (const collectionId of file.collectionIds) {
@@ -70,298 +62,357 @@ export function LibraryClient() {
     return counts;
   }, [audioFiles]);
 
-  const collectionsById = useMemo(() => new Map(collections.map((c) => [c.id, c])), [collections]);
+  const categories = useMemo(() => {
+    const names = new Set<string>();
+    for (const collection of collections) {
+      if (collection.category) names.add(collection.category);
+    }
+    return Array.from(names).sort((a, b) => a.localeCompare(b, "sv"));
+  }, [collections]);
 
-  function toggleSelected(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
+  const groups = useMemo<CollectionGroup[]>(() => {
+    const byCategory = new Map<string, Collection[]>();
+    for (const collection of collections) {
+      const key = collection.category ?? UNCATEGORISED;
+      const existing = byCategory.get(key);
+      if (existing) existing.push(collection);
+      else byCategory.set(key, [collection]);
+    }
 
-  async function updateFile(id: string, patch: { category?: AudioCategory | null }) {
-    const res = await fetch(`/api/audio-files/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
-    });
-    if (!res.ok) return;
-    const { audioFile } = await res.json();
-    setAudioFiles((prev) =>
-      prev.map((f) => (f.id === id ? { ...f, ...audioFile } : f))
-    );
-  }
+    const categorised = categories.map((category) => ({
+      key: category,
+      label: category,
+      collections: byCategory.get(category) ?? [],
+    }));
+    const loose = byCategory.get(UNCATEGORISED);
+    return loose
+      ? [...categorised, { key: UNCATEGORISED, label: "Utan kategori", collections: loose }]
+      : categorised;
+  }, [collections, categories]);
 
-  async function addSelectionToCollection() {
-    if (selectedIds.size === 0 || !bulkTargetCollection) return;
-    const res = await fetch(`/api/collections/${bulkTargetCollection}/members`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ add: Array.from(selectedIds) }),
-    });
-    if (!res.ok) return;
-    await loadAll();
-  }
-
-  async function removeFileFromCollection(fileId: string, collectionId: string) {
-    const res = await fetch(`/api/collections/${collectionId}/members`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ remove: [fileId] }),
-    });
-    if (!res.ok) return;
-    await loadAll();
-  }
-
-  async function createCollection() {
-    const name = newCollectionName.trim();
-    if (!name) return;
-    const res = await fetch("/api/collections", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    if (!res.ok) return;
-    setNewCollectionName("");
-    await loadAll();
-  }
-
-  async function deleteCollection(id: string) {
-    const res = await fetch(`/api/collections/${id}`, { method: "DELETE" });
-    if (!res.ok) return;
-    if (collectionFilter === id) setCollectionFilter("all");
-    await loadAll();
-  }
+  // A category that disappears — renamed away, or its last collection deleted —
+  // would otherwise leave the page filtered down to nothing.
+  const effectiveCategory =
+    activeCategory && groups.some((g) => g.key === activeCategory) ? activeCategory : null;
+  const visibleGroups = effectiveCategory
+    ? groups.filter((group) => group.key === effectiveCategory)
+    : groups;
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12">
-      <div>
-        <p className="font-mono text-xs uppercase tracking-[0.2em] text-ember-400">Lyriad</p>
-        <h1 className="mt-1 font-display text-2xl font-medium tracking-wide text-parchment-100 sm:text-3xl">
-          Ljudbibliotek
-        </h1>
-      </div>
+    <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-8 px-4 py-8 sm:px-6 sm:py-12">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="font-mono text-xs uppercase tracking-[0.2em] text-ember-400">Lyriad</p>
+          <h1 className="mt-1 font-display text-2xl font-medium tracking-wide text-parchment-100 sm:text-3xl">
+            Ljudbibliotek
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Samlingar av ljud, sorterade under egna kategorier.
+          </p>
+        </div>
 
-      <AudioUploader onUploaded={() => void loadAll()} />
+        <div className="flex flex-none items-center gap-2">
+          <NewCollectionButton
+            categories={categories}
+            defaultCategory={effectiveCategory === UNCATEGORISED ? null : effectiveCategory}
+            onCreated={() => void loadAll()}
+          />
 
-      <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
-        <h2 className="text-sm font-medium text-parchment-100">Samlingar</h2>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setCollectionFilter("all")}
-            className={`focus-ring rounded-md border px-2.5 py-1 text-xs transition ${
-              collectionFilter === "all"
-                ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
-                : "border-border-strong text-parchment-300 hover:border-ember-400/40"
-            }`}
-          >
-            Alla filer
-          </button>
-          {collections.map((collection) => (
-            <span key={collection.id} className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setCollectionFilter(collection.id)}
-                className={`focus-ring rounded-md border px-2.5 py-1 text-xs transition ${
-                  collectionFilter === collection.id
-                    ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
-                    : "border-border-strong text-parchment-300 hover:border-ember-400/40"
-                }`}
-              >
-                {collection.name} ({collectionFileCounts.get(collection.id) ?? 0})
-              </button>
-              <Tooltip label="Ta bort samling" placement="bottom" align="end">
+          <Popover
+            panelClassName="w-80 max-w-[calc(100vw-2rem)]"
+            trigger={({ open, toggle }) => (
+              <Tooltip label="Ladda upp ljud" align="end">
                 <button
                   type="button"
-                  onClick={() => void deleteCollection(collection.id)}
-                  className="focus-ring rounded-full text-xs text-muted-foreground transition hover:text-danger-foreground"
-                  aria-label={`Ta bort samlingen ${collection.name}`}
+                  onClick={toggle}
+                  aria-expanded={open}
+                  aria-label="Ladda upp ljud"
+                  className={`focus-ring flex h-9 w-9 items-center justify-center rounded-lg border transition ${
+                    open
+                      ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
+                      : "border-border-strong text-muted-foreground hover:border-ember-400/40 hover:text-ember-300"
+                  }`}
                 >
-                  ×
+                  <UploadIcon className="h-4 w-4" />
                 </button>
               </Tooltip>
-            </span>
-          ))}
-          {collections.length === 0 && (
-            <span className="text-xs text-muted-foreground">Inga samlingar ännu.</span>
-          )}
-        </div>
-        <div className="mt-3 flex items-center gap-2">
-          <input
-            type="text"
-            value={newCollectionName}
-            onChange={(e) => setNewCollectionName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void createCollection();
-            }}
-            placeholder="Ny samling, t.ex. Vinterfestens kampanj"
-            className="focus-ring flex-1 rounded-md border border-border-strong bg-background px-2.5 py-1.5 text-xs text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400"
-          />
-          <button
-            type="button"
-            onClick={() => void createCollection()}
-            className="focus-ring rounded-md border border-border-strong px-2.5 py-1.5 text-xs text-parchment-200 transition hover:border-ember-400/60 hover:text-ember-300"
+            )}
           >
-            Skapa
-          </button>
+            <AudioUploader onUploaded={() => void loadAll()} />
+          </Popover>
         </div>
       </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Sök på filnamn…"
-          className="focus-ring min-w-[16rem] flex-1 rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400"
-        />
-        <div className="flex flex-wrap items-center gap-1 text-xs">
-          <button
-            type="button"
-            onClick={() => setCategoryFilter("all")}
-            className={`focus-ring rounded-md border px-2.5 py-1 transition ${
-              categoryFilter === "all"
-                ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
-                : "border-border-strong text-parchment-300 hover:border-ember-400/40"
-            }`}
-          >
-            Alla typer
-          </button>
-          {AUDIO_CATEGORIES.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setCategoryFilter(c)}
-              className={`focus-ring rounded-md border px-2.5 py-1 transition ${
-                categoryFilter === c
-                  ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
-                  : "border-border-strong text-parchment-300 hover:border-ember-400/40"
-              }`}
-            >
-              {AUDIO_CATEGORY_LABELS[c]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {selectedIds.size > 0 && (
-        <div className="flex flex-col gap-3 rounded-lg border border-ember-400/40 bg-surface p-4 shadow-sm">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-parchment-100">{selectedIds.size} filer markerade</span>
-            <button
-              type="button"
-              onClick={() => setSelectedIds(new Set())}
-              className="focus-ring rounded-sm text-xs text-muted-foreground hover:text-parchment-100"
-            >
-              Avmarkera alla
-            </button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={bulkTargetCollection}
-              onChange={(e) => setBulkTargetCollection(e.target.value)}
-              className="focus-ring rounded-md border border-border-strong bg-background px-2.5 py-1.5 text-xs text-parchment-100 focus:border-ember-400"
-            >
-              <option value="">Välj samling…</option>
-              {collections.map((collection) => (
-                <option key={collection.id} value={collection.id}>
-                  {collection.name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => void addSelectionToCollection()}
-              disabled={!bulkTargetCollection}
-              className="focus-ring rounded-md border border-border-strong px-3 py-1.5 text-xs text-parchment-200 transition hover:border-ember-400/60 hover:text-ember-300 disabled:opacity-40"
-            >
-              Lägg till markerade i samling
-            </button>
-          </div>
-        </div>
-      )}
 
       {loading && <p className="text-sm text-muted-foreground">Laddar…</p>}
       {error && <p className="text-sm text-danger-foreground">{error}</p>}
 
-      {!loading && !error && audioFiles.length === 0 && (
-        <p className="rounded-lg border border-dashed border-border-strong/70 bg-surface/50 px-4 py-6 text-center text-sm text-muted-foreground">
-          Inga ljudfiler ännu — ladda upp din första ovan.
-        </p>
-      )}
-
-      {!loading && !error && audioFiles.length > 0 && filtered.length === 0 && (
-        <p className="text-sm text-muted-foreground">
-          {isFiltered
-            ? "Inga ljudfiler matchar filtret."
-            : "Inga ljudfiler att visa."}
-        </p>
-      )}
-
-      <div className="flex flex-col gap-2">
-        {filtered.map((file) => (
-          <div
-            key={file.id}
-            className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 shadow-xs transition hover:border-border-strong"
-          >
-            <div className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                checked={selectedIds.has(file.id)}
-                onChange={() => toggleSelected(file.id)}
-                aria-label={`Markera ${file.filename}`}
-                className="focus-ring lyriad-checkbox mt-1 h-3.5 w-3.5 flex-none"
-              />
-              <div className="flex-1">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="truncate text-sm font-medium text-parchment-100">{file.filename}</p>
-                  <span className="flex-none font-mono text-xs text-muted-foreground">
-                    {formatBytes(file.sizeBytes)}
-                  </span>
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <select
-                    value={file.category ?? ""}
-                    onChange={(e) =>
-                      void updateFile(file.id, {
-                        category: e.target.value ? (e.target.value as AudioCategory) : null,
-                      })
-                    }
-                    className="focus-ring rounded-md border border-border-strong bg-background px-2 py-1 text-xs text-parchment-100 focus:border-ember-400"
+      {!loading && !error && (
+        <>
+          {categories.length > 0 && (
+            <section className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="font-display text-lg font-medium tracking-wide text-parchment-100">
+                  Kategorier
+                </h2>
+                {effectiveCategory && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveCategory(null)}
+                    className="focus-ring rounded-md px-2 py-1 text-xs text-ember-300 transition hover:text-ember-200"
                   >
-                    <option value="">Ingen typ</option>
-                    {AUDIO_CATEGORIES.map((c) => (
-                      <option key={c} value={c}>
-                        {AUDIO_CATEGORY_LABELS[c]}
-                      </option>
-                    ))}
-                  </select>
-                  {file.collectionIds.map((collectionId) => (
-                    <span
-                      key={collectionId}
-                      className="flex items-center gap-1 rounded-full bg-surface-elevated px-2 py-0.5 text-xs text-parchment-300"
-                    >
-                      {collectionsById.get(collectionId)?.name ?? "Okänd samling"}
-                      <button
-                        type="button"
-                        onClick={() => void removeFileFromCollection(file.id, collectionId)}
-                        className="focus-ring rounded-full text-muted-foreground transition hover:text-danger-foreground"
-                        aria-label="Ta bort från samling"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
+                    Visa alla kategorier
+                  </button>
+                )}
               </div>
-            </div>
-          </div>
-        ))}
-      </div>
+
+              <CardCarousel label="Kategorier">
+                {categories.map((category) => (
+                  <CategoryCard
+                    key={category}
+                    category={category}
+                    collectionCount={
+                      groups.find((g) => g.key === category)?.collections.length ?? 0
+                    }
+                    active={effectiveCategory === category}
+                    onSelect={() =>
+                      setActiveCategory((current) => (current === category ? null : category))
+                    }
+                  />
+                ))}
+              </CardCarousel>
+            </section>
+          )}
+
+          {collections.length === 0 && (
+            <p className="rounded-lg border border-dashed border-border-strong/70 bg-surface/50 px-4 py-6 text-center text-sm text-muted-foreground">
+              Inga samlingar ännu — skapa en samling med “Ny samling” och lägg dina ljud i den.
+            </p>
+          )}
+
+          {visibleGroups.map((group) => (
+            <section key={group.key} className="flex flex-col gap-3">
+              <div className="flex items-baseline gap-3">
+                <h2 className="font-display text-lg font-medium tracking-wide text-parchment-100">
+                  {group.label}
+                </h2>
+                <span className="font-mono text-xs text-muted-foreground">
+                  {group.collections.length}{" "}
+                  {group.collections.length === 1 ? "samling" : "samlingar"}
+                </span>
+              </div>
+
+              <CardCarousel label={`Samlingar i ${group.label}`}>
+                {group.collections.map((collection) => (
+                  <CollectionCard
+                    key={collection.id}
+                    collection={collection}
+                    trackCount={fileCountByCollection.get(collection.id) ?? 0}
+                  />
+                ))}
+              </CardCarousel>
+            </section>
+          ))}
+
+          <AudioFileList
+            files={audioFiles}
+            collections={collections}
+            onChanged={() => void loadAll()}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function CategoryCard({
+  category,
+  collectionCount,
+  active,
+  onSelect,
+}: {
+  category: string;
+  collectionCount: number;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={active}
+      className={`focus-ring group relative aspect-[16/7] w-[17rem] flex-none snap-start overflow-hidden rounded-xl border text-left transition sm:w-[21rem] ${
+        active
+          ? "border-ember-400/70 shadow-glow-sm"
+          : "border-border hover:border-ember-400/40 hover:shadow-md"
+      }`}
+    >
+      <CollectionArtwork seed={`category:${category}`} active={active} />
+      <span className="relative flex h-full flex-col justify-end gap-0.5 p-4">
+        <span className="font-display text-lg font-medium tracking-wide text-parchment-50 drop-shadow">
+          {category}
+        </span>
+        <span className="font-mono text-[11px] text-parchment-300/90">
+          {collectionCount} {collectionCount === 1 ? "samling" : "samlingar"}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function CollectionCard({
+  collection,
+  trackCount,
+}: {
+  collection: Collection;
+  trackCount: number;
+}) {
+  return (
+    <Link
+      href={`/library/${collection.id}`}
+      className="focus-ring group relative aspect-video w-[13rem] flex-none snap-start overflow-hidden rounded-xl border border-border transition hover:border-ember-400/40 hover:shadow-md sm:w-[15rem]"
+    >
+      <CollectionArtwork seed={collection.id} />
+      <span className="relative flex h-full flex-col justify-end gap-0.5 p-3">
+        <span className="font-display text-sm font-medium tracking-wide text-parchment-50 drop-shadow">
+          {collection.name}
+        </span>
+        <span className="font-mono text-[11px] text-parchment-300/90">
+          {trackCount} {trackCount === 1 ? "spår" : "spår"}
+        </span>
+      </span>
+    </Link>
+  );
+}
+
+function NewCollectionButton({
+  categories,
+  defaultCategory,
+  onCreated,
+}: {
+  categories: string[];
+  defaultCategory: string | null;
+  onCreated: () => void;
+}) {
+  return (
+    <Popover
+      panelClassName="w-72 max-w-[calc(100vw-2rem)]"
+      trigger={({ open, toggle }) => (
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          className={`focus-ring flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition ${
+            open
+              ? "border-ember-400/60 bg-ember-400/10 text-ember-300"
+              : "border-border-strong text-parchment-200 hover:border-ember-400/40 hover:text-ember-300"
+          }`}
+        >
+          <PlusIcon className="h-4 w-4" />
+          Ny samling
+        </button>
+      )}
+    >
+      {({ close }) => (
+        <NewCollectionForm
+          categories={categories}
+          defaultCategory={defaultCategory}
+          onCreated={() => {
+            onCreated();
+            close();
+          }}
+        />
+      )}
+    </Popover>
+  );
+}
+
+function NewCollectionForm({
+  categories,
+  defaultCategory,
+  onCreated,
+}: {
+  categories: string[];
+  defaultCategory: string | null;
+  onCreated: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState(defaultCategory ?? "");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/collections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmedName, category: category.trim() || null }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Kunde inte skapa samlingen");
+      }
+      onCreated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Kunde inte skapa samlingen");
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <label className="flex flex-col gap-1">
+        <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+          Namn
+        </span>
+        <input
+          type="text"
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void submit();
+          }}
+          placeholder="t.ex. Skogsvandring"
+          className="focus-ring rounded-md border border-border-strong bg-background px-2 py-1.5 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400"
+        />
+      </label>
+
+      <label className="flex flex-col gap-1">
+        <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+          Kategori (valfritt)
+        </span>
+        <input
+          type="text"
+          value={category}
+          list="lyriad-collection-categories"
+          onChange={(e) => setCategory(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void submit();
+          }}
+          placeholder="t.ex. Miljöer"
+          className="focus-ring rounded-md border border-border-strong bg-background px-2 py-1.5 text-sm text-parchment-100 placeholder:text-muted-foreground focus:border-ember-400"
+        />
+        <datalist id="lyriad-collection-categories">
+          {categories.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
+      </label>
+
+      {error && <p className="text-xs text-danger-foreground">{error}</p>}
+
+      <button
+        type="button"
+        onClick={() => void submit()}
+        disabled={!name.trim() || submitting}
+        className="focus-ring rounded-md bg-gradient-to-b from-ember-400 to-ember-500 px-3 py-1.5 text-sm font-medium text-ink-950 shadow-sm transition hover:shadow-glow-sm disabled:cursor-not-allowed disabled:from-ink-700 disabled:to-ink-700 disabled:text-parchment-500/50 disabled:shadow-none"
+      >
+        {submitting ? "Skapar…" : "Skapa samling"}
+      </button>
     </div>
   );
 }

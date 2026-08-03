@@ -36,6 +36,8 @@ export type AudioFileWithMeta = AudioFileWithPlaybackUrl & { collectionIds: stri
 export type Collection = {
   id: string;
   name: string;
+  /** Free-form theme the collection is filed under; null means uncategorised. */
+  category: string | null;
   createdAt: string;
 };
 

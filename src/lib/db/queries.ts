@@ -62,6 +62,7 @@ function toCollection(row: typeof collections.$inferSelect): Collection {
   return {
     id: row.id,
     name: row.name,
+    category: row.category,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -324,9 +325,29 @@ export async function listCollections(): Promise<Collection[]> {
   return rows.map(toCollection);
 }
 
-export async function createCollection(name: string): Promise<Collection> {
-  const [row] = await db.insert(collections).values({ name }).returning();
+export async function getCollection(id: string): Promise<Collection | null> {
+  const [row] = await db.select().from(collections).where(eq(collections.id, id)).limit(1);
+  return row ? toCollection(row) : null;
+}
+
+export async function createCollection(input: {
+  name: string;
+  category: string | null;
+}): Promise<Collection> {
+  const [row] = await db.insert(collections).values(input).returning();
   return toCollection(row);
+}
+
+export async function updateCollection(
+  id: string,
+  patch: Partial<{ name: string; category: string | null }>
+): Promise<Collection | null> {
+  const [row] = await db
+    .update(collections)
+    .set(patch)
+    .where(eq(collections.id, id))
+    .returning();
+  return row ? toCollection(row) : null;
 }
 
 export async function deleteCollection(id: string): Promise<boolean> {

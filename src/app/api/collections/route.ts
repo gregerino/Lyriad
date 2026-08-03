@@ -4,6 +4,7 @@ import { createCollection, listCollections } from "@/lib/db/queries";
 
 const createCollectionSchema = z.object({
   name: z.string().trim().min(1).max(100),
+  category: z.string().trim().min(1).max(60).nullable().optional(),
 });
 
 export async function GET() {
@@ -21,6 +22,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const collection = await createCollection(parsed.data.name);
+  const collection = await createCollection({
+    name: parsed.data.name,
+    category: parsed.data.category ?? null,
+  });
   return NextResponse.json({ collection }, { status: 201 });
 }

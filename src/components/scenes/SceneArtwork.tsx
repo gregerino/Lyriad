@@ -1,5 +1,7 @@
 "use client";
 
+import { hashSeed } from "@/lib/artwork";
+
 type SceneArtworkProps = {
   /** Seeds the shape/tint so two scenes don't look identical. */
   sceneId: string;
@@ -7,15 +9,6 @@ type SceneArtworkProps = {
   active?: boolean;
   className?: string;
 };
-
-function hashSeed(value: string): number {
-  let hash = 0;
-  for (let i = 0; i < value.length; i++) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
 
 /**
  * Decorative placeholder for the scene's centrepiece — no artwork exists in the

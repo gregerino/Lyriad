@@ -50,6 +50,13 @@
       "when": 1785183737125,
       "tag": "0006_cute_captain_flint",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785789881977,
+      "tag": "0007_bumpy_mystique",
+      "breakpoints": true
     }
   ]
 }

@@ -4,14 +4,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { QuickAccessPanel } from "@/components/nav/QuickAccessPanel";
 import { Tooltip } from "@/components/ui/Tooltip";
-import { LibraryIcon, MenuIcon, MixerIcon, ScenesIcon, XIcon } from "@/components/ui/icons";
-
-const NAV_ITEMS = [
-  { href: "/", label: "Mixer", icon: MixerIcon, isActive: (path: string) => path === "/" || /^\/scenes\/[^/]+$/.test(path) },
-  { href: "/scenes", label: "Scener", icon: ScenesIcon, isActive: (path: string) => path === "/scenes" },
-  { href: "/library", label: "Ljudbibliotek", icon: LibraryIcon, isActive: (path: string) => path.startsWith("/library") },
-];
+import { MenuIcon, XIcon } from "@/components/ui/icons";
 
 export function AppHeader() {
   const [open, setOpen] = useState(false);
@@ -24,6 +19,17 @@ export function AppHeader() {
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
+  // The drawer scrolls its own list; letting the page scroll behind it on a
+  // tablet drags the mixer around under the user's thumb.
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
   }, [open]);
 
   if (pathname === "/login") return null;
@@ -68,14 +74,17 @@ export function AppHeader() {
         }`}
       />
 
-      <nav
-        aria-hidden={!open}
-        aria-label="Huvudmeny"
-        className={`fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col gap-1 border-r border-border bg-surface p-4 shadow-lg transition-transform duration-200 ${
+      <div
+        // `inert` rather than aria-hidden: the closed drawer keeps its scene
+        // list mounted, and its links must be out of reach of Tab as well as
+        // out of the accessibility tree.
+        inert={!open}
+        aria-label="Snabbåtkomst"
+        className={`fixed inset-y-0 left-0 z-50 flex w-[21rem] max-w-[85vw] flex-col border-r border-border bg-surface p-4 shadow-lg transition-transform duration-200 sm:w-[23rem] ${
           open ? "translate-x-0" : "pointer-events-none -translate-x-full"
         }`}
       >
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex flex-none items-center justify-between">
           <span className="flex items-center gap-2.5 font-display text-sm font-medium tracking-[0.2em] text-parchment-100 uppercase">
             <Image
               src="/lyriad-icon.png"
@@ -86,38 +95,20 @@ export function AppHeader() {
             />
             Lyriad
           </span>
-          <Tooltip label="Stäng" placement="bottom">
+          <Tooltip label="Stäng" placement="bottom" align="end">
             <button
               type="button"
               onClick={() => setOpen(false)}
               aria-label="Stäng meny"
-              className="focus-ring flex h-8 w-8 items-center justify-center rounded-md text-parchment-400 transition hover:bg-surface-elevated hover:text-ember-300"
+              className="focus-ring flex h-9 w-9 items-center justify-center rounded-md text-parchment-400 transition hover:bg-surface-elevated hover:text-ember-300"
             >
               <XIcon className="h-4 w-4" />
             </button>
           </Tooltip>
         </div>
 
-        {NAV_ITEMS.map((item) => {
-          const active = item.isActive(pathname);
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={() => setOpen(false)}
-              className={`focus-ring flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition ${
-                active
-                  ? "border-l-2 border-ember-400 bg-ember-400/10 text-ember-300"
-                  : "border-l-2 border-transparent text-parchment-300 hover:bg-surface-elevated hover:text-parchment-100"
-              }`}
-            >
-              <Icon className="h-4 w-4 flex-none" />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
+        <QuickAccessPanel open={open} pathname={pathname} onClose={() => setOpen(false)} />
+      </div>
     </>
   );
 }

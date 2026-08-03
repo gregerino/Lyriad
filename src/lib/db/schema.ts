@@ -37,6 +37,8 @@ export const audioFiles = pgTable(
 export const collections = pgTable("collections", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
+  /** Free-form theme the collection is filed under ("Strider", "Magi", …). */
+  category: text("category"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

@@ -161,6 +161,17 @@ body {
   box-shadow: var(--shadow-glow-sm);
 }
 
+/* Horizontal card rows scroll by their own arrow buttons (and by touch), so a
+   scrollbar underneath the artwork would only add a grey line to every row. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Shared checkbox styling. A native checkbox ignores border-radius — the
    browser paints its own box — so it has to be redrawn from scratch to get a
    corner as soft as everything around it. Size stays with the caller. */
