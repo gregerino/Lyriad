@@ -235,13 +235,16 @@ export class AudioEngine {
     name: string,
     url: string,
     groupId: string,
-    initialVolume = 1,
-    objectUrl: string | null = null,
+    options: { volume?: number; loop?: boolean; objectUrl?: string | null } = {},
   ): Promise<void> {
+    const { volume: initialVolume = 1, loop = false, objectUrl = null } = options;
     const element = new Audio();
     // No crossOrigin: the element never enters the Web Audio graph, so there is
     // nothing to taint, and plain <audio> playback needs no CORS at all.
     element.preload = "auto";
+    // Set before the source is live so a slot restored as looping loops from its
+    // very first play, not only once someone touches the toggle.
+    element.loop = loop;
     element.src = url;
 
     try {
@@ -269,8 +272,21 @@ export class AudioEngine {
 
     this.ensureGroup(groupId);
 
-    // Keeps the UI honest about a track that reached its end on its own.
-    element.addEventListener("ended", () => this.notify());
+    // A looping element normally restarts itself and never fires "ended" at all,
+    // but it does end when the browser can't pin the media's duration down (a
+    // stream without a usable length, a file whose metadata says nothing). Winding
+    // it back by hand means "loop på" holds in that case too. Otherwise this just
+    // keeps the UI honest about a track that reached its end on its own.
+    element.addEventListener("ended", () => {
+      const current = this.tracks.get(id);
+      // Only for the track this element still belongs to — a reassigned slot's
+      // old element must not drag the new one's playback along with it.
+      if (current?.element === element && element.loop) {
+        element.currentTime = 0;
+        this.startElement(current);
+      }
+      this.notify();
+    });
 
     // Checked right before committing (not before the await above) so that if two
     // loads for the same slot overlap — e.g. a retry click racing the initial load —

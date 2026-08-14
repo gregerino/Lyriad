@@ -244,7 +244,12 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only the id needs to re-trigger this; other scene field edits shouldn't rewrite the cookie
   }, [scene?.id]);
 
-  async function loadMusicAudio(slotIndex: number, audioFileId: string, volume: number) {
+  async function loadMusicAudio(
+    slotIndex: number,
+    audioFileId: string,
+    volume: number,
+    loop: boolean
+  ) {
     const file = audioFilesById.get(audioFileId);
     if (!file) {
       setMusicLoadState((prev) => ({
@@ -260,7 +265,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
         file.filename,
         file.playbackUrl,
         musicGroupId(slotIndex),
-        volume
+        { volume, loop }
       );
       setMusicLoadState((prev) => ({ ...prev, [slotIndex]: { status: "loaded" } }));
     } catch {
@@ -302,7 +307,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
       if (slot.audioFileId) {
         if (loadedMusicRef.current[slot.slotIndex] !== slot.audioFileId) {
           loadedMusicRef.current[slot.slotIndex] = slot.audioFileId;
-          void loadMusicAudio(slot.slotIndex, slot.audioFileId, slot.volume);
+          void loadMusicAudio(slot.slotIndex, slot.audioFileId, slot.volume, slot.loop);
         }
       } else if (loadedMusicRef.current[slot.slotIndex]) {
         delete loadedMusicRef.current[slot.slotIndex];
@@ -949,7 +954,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                 onClear={() => void clearMusicSlot(slot.slotIndex)}
                 onRetry={() => {
                   if (slot.audioFileId)
-                    void loadMusicAudio(slot.slotIndex, slot.audioFileId, slot.volume);
+                    void loadMusicAudio(slot.slotIndex, slot.audioFileId, slot.volume, slot.loop);
                 }}
                 onPlay={() => startMusic(slot.slotIndex)}
                 onPause={() => pauseMusic(slot.slotIndex)}

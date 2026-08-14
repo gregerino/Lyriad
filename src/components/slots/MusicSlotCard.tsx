@@ -95,6 +95,9 @@ export function MusicSlotCard({
   const trackId = track?.id;
   const isPlaying = track?.isPlaying ?? false;
   const duration = track?.duration ?? 0;
+  // The slot's stored setting stands in until the track is loaded, so the menu
+  // and the column's loop button never disagree about a slot in the same scene.
+  const looping = track?.loop ?? slot.loop;
 
   useEffect(() => {
     if (!trackId) return;
@@ -267,12 +270,12 @@ export function MusicSlotCard({
                   </button>
                   <button
                     type="button"
-                    onClick={() => onLoopChange(!track?.loop)}
-                    aria-pressed={track?.loop ?? false}
-                    className={`${MENU_ITEM_CLASS} ${track?.loop ? "text-ember-300" : ""}`}
+                    onClick={() => onLoopChange(!looping)}
+                    aria-pressed={looping}
+                    className={`${MENU_ITEM_CLASS} ${looping ? "text-ember-300" : ""}`}
                   >
                     <LoopIcon className="h-3.5 w-3.5" />
-                    {track?.loop ? "Loop på" : "Loop av"}
+                    {looping ? "Loop på" : "Loop av"}
                   </button>
                   <button
                     type="button"

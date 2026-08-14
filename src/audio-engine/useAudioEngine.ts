@@ -26,17 +26,28 @@ export function useAudioEngine() {
   }, [engine]);
 
   const loadTrack = useCallback(
-    async (id: string, file: File, groupId: string, initialVolume?: number) => {
+    async (
+      id: string,
+      file: File,
+      groupId: string,
+      options: { volume?: number; loop?: boolean } = {},
+    ) => {
       // Music streams from an object URL rather than being read into memory.
       const objectUrl = URL.createObjectURL(file);
-      await engine.loadTrack(id, file.name, objectUrl, groupId, initialVolume, objectUrl);
+      await engine.loadTrack(id, file.name, objectUrl, groupId, { ...options, objectUrl });
     },
     [engine],
   );
 
   const loadTrackFromUrl = useCallback(
-    async (id: string, name: string, url: string, groupId: string, initialVolume?: number) => {
-      await engine.loadTrack(id, name, url, groupId, initialVolume);
+    async (
+      id: string,
+      name: string,
+      url: string,
+      groupId: string,
+      options: { volume?: number; loop?: boolean } = {},
+    ) => {
+      await engine.loadTrack(id, name, url, groupId, options);
     },
     [engine],
   );
