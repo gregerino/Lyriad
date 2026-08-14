@@ -1,7 +1,7 @@
 /** Shared between client and server — no node-only APIs here. */
 import type { AudioCategory } from "@/types/domain";
 
-export const MAX_AUDIO_UPLOAD_BYTES = 105 * 1024 * 1024;
+export const MAX_AUDIO_UPLOAD_BYTES = 200 * 1024 * 1024;
 
 export const AUDIO_CATEGORIES = ["music", "oneshot"] as const;
 

@@ -153,7 +153,7 @@ varje domän (prod + ev. preview-URL:er) explicit.
 
 **Validering:** endast mp3/wav/ogg tillåts (kontrolleras på filändelsen,
 inte webbläsarens `Content-Type`, som är opålitlig för wav/ogg), och max
-filstorlek är 105 MB (`MAX_AUDIO_UPLOAD_BYTES` i `src/lib/audio/limits.ts`).
+filstorlek är 200 MB (`MAX_AUDIO_UPLOAD_BYTES` i `src/lib/audio/limits.ts`).
 Storleken skickas med i begäran om uppladdnings-URL och kontrolleras igen
 när filen registreras.
 

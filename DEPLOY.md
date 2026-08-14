@@ -84,7 +84,7 @@ direkt till R2 (`PUT` från webbläsaren), sedan registreras bara metadata
 
 Det innebär att varken funktions-timeout eller request body-gränsen för
 Vercel-funktioner blir en flaskhals, oavsett filstorlek — max filstorlek
-(105 MB, `MAX_AUDIO_UPLOAD_BYTES` i
+(200 MB, `MAX_AUDIO_UPLOAD_BYTES` i
 [`src/lib/audio/limits.ts`](src/lib/audio/limits.ts)) styrs av appens egen
 validering, inte av plattformen. Inget behöver justeras här för deploy.
 
