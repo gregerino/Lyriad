@@ -11,7 +11,9 @@ import {
 import type { AudioCategory, AudioFile, Scene } from "@/types/domain";
 import { uploadWithProgress } from "./uploadWithProgress";
 
-type FreeSlot = { kind: "music" | "oneshot"; slotIndex: number };
+type FreeSlot =
+  | { kind: "music"; slotIndex: number }
+  | { kind: "oneshot"; slotIndex: number; setId: string; setName: string };
 
 type Status =
   | { step: "idle" }
@@ -25,14 +27,24 @@ type Status =
 type AudioUploaderProps = {
   /** When set, a successful upload offers to assign the file to a free slot on this scene. */
   sceneId?: string;
+  /** The one-shot set "första lediga one-shot" should aim at — the one on screen. */
+  oneShotSetId?: string;
   /** When set, locks the category to this value and hides the category selector. */
   category?: AudioCategory | null;
   onUploaded?: (audioFile: AudioFile) => void;
   onAssigned?: (info: { slot: FreeSlot; audioFile: AudioFile }) => void;
 };
 
+function slotKey(slot: FreeSlot): string {
+  return slot.kind === "music"
+    ? `music-${slot.slotIndex}`
+    : `oneshot-${slot.setId}-${slot.slotIndex}`;
+}
+
 function slotLabel(slot: FreeSlot): string {
-  return slot.kind === "music" ? `Musik ${slot.slotIndex}` : `One-shot ${slot.slotIndex}`;
+  return slot.kind === "music"
+    ? `Musik ${slot.slotIndex}`
+    : `${slot.setName} · one-shot ${slot.slotIndex}`;
 }
 
 /**
@@ -76,7 +88,7 @@ function AssignStep({
       <div className="flex flex-wrap gap-2">
         {quickSlots.map((slot) => (
           <button
-            key={`${slot.kind}-${slot.slotIndex}`}
+            key={slotKey(slot)}
             type="button"
             onClick={() => onAssign(slot)}
             className="focus-ring rounded-md border border-border-strong bg-background px-3 py-1.5 text-xs text-parchment-100 transition hover:border-ember-400/60 hover:text-ember-300"
@@ -91,7 +103,7 @@ function AssignStep({
         <select
           value=""
           onChange={(e) => {
-            const chosen = freeSlots.find((s) => `${s.kind}-${s.slotIndex}` === e.target.value);
+            const chosen = freeSlots.find((s) => slotKey(s) === e.target.value);
             if (chosen) onAssign(chosen);
           }}
           aria-label="Välj en särskild plats"
@@ -99,7 +111,7 @@ function AssignStep({
         >
           <option value="">Eller välj en särskild plats…</option>
           {freeSlots.map((slot) => (
-            <option key={`${slot.kind}-${slot.slotIndex}`} value={`${slot.kind}-${slot.slotIndex}`}>
+            <option key={slotKey(slot)} value={slotKey(slot)}>
               {slotLabel(slot)}
             </option>
           ))}
@@ -116,7 +128,13 @@ function AssignStep({
   );
 }
 
-export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: AudioUploaderProps) {
+export function AudioUploader({
+  sceneId,
+  oneShotSetId,
+  category,
+  onUploaded,
+  onAssigned,
+}: AudioUploaderProps) {
   const [status, setStatus] = useState<Status>({ step: "idle" });
   const [dragActive, setDragActive] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<AudioCategory | null>(null);
@@ -132,9 +150,21 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
     const music = scene.musicSlots
       .filter((s) => s.audioFileId === null)
       .map((s): FreeSlot => ({ kind: "music", slotIndex: s.slotIndex }));
-    const oneshot = scene.oneShotSlots
-      .filter((s) => s.audioFileId === null)
-      .map((s): FreeSlot => ({ kind: "oneshot", slotIndex: s.slotIndex }));
+    // The set on screen comes first, so "första lediga one-shot" lands where the
+    // user is looking rather than in whichever set happens to sort first.
+    const sets = [...scene.oneShotSets].sort((a, b) =>
+      a.id === oneShotSetId ? -1 : b.id === oneShotSetId ? 1 : 0
+    );
+    const oneshot = sets.flatMap((set) =>
+      set.slots
+        .filter((s) => s.audioFileId === null)
+        .map((s): FreeSlot => ({
+          kind: "oneshot",
+          slotIndex: s.slotIndex,
+          setId: set.id,
+          setName: set.name,
+        }))
+    );
     return [...music, ...oneshot];
   }
 
@@ -210,7 +240,7 @@ export function AudioUploader({ sceneId, category, onUploaded, onAssigned }: Aud
       const path =
         slot.kind === "music"
           ? `/api/scenes/${sceneId}/music-slots/${slot.slotIndex}`
-          : `/api/scenes/${sceneId}/oneshot-slots/${slot.slotIndex}`;
+          : `/api/scenes/${sceneId}/oneshot-sets/${slot.setId}/slots/${slot.slotIndex}`;
       const res = await fetch(path, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

@@ -91,23 +91,42 @@ export const sceneMusicSlots = pgTable(
   ]
 );
 
+/**
+ * A bank of one-shot pads within a scene — "Strid", "Krogen", "Resan". A scene
+ * always has at least one; the pad grid shows exactly one at a time.
+ */
+export const sceneOneshotSets = pgTable("scene_oneshot_sets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  sceneId: uuid("scene_id")
+    .notNull()
+    .references(() => scenes.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  /** Tab order within the scene; ties fall back to created_at. */
+  position: smallint("position").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const sceneOneshotSlots = pgTable(
   "scene_oneshot_slots",
   {
-    sceneId: uuid("scene_id")
+    setId: uuid("set_id")
       .notNull()
-      .references(() => scenes.id, { onDelete: "cascade" }),
+      .references(() => sceneOneshotSets.id, { onDelete: "cascade" }),
     slotIndex: smallint("slot_index").notNull(),
     audioFileId: uuid("audio_file_id").references(() => audioFiles.id, {
       onDelete: "set null",
     }),
     name: text("name"),
     volume: real("volume").notNull().default(0.8),
+    /** A looping pad keeps going until it is pressed again — rain, a crowd, a fire. */
+    loop: boolean("loop").notNull().default(false),
     color: text("color"),
     icon: text("icon"),
   },
   (table) => [
-    primaryKey({ columns: [table.sceneId, table.slotIndex] }),
+    primaryKey({ columns: [table.setId, table.slotIndex] }),
     check("scene_oneshot_slots_slot_index_check", sql`${table.slotIndex} BETWEEN 1 AND 20`),
     check("scene_oneshot_slots_volume_check", sql`${table.volume} BETWEEN 0 AND 1`),
   ]

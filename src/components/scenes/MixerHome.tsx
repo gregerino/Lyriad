@@ -117,7 +117,8 @@ export function MixerHome() {
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Korta ljud du avfyrar i stunden — en dörr, ett åskslag, ett tärningskast.
-            De lägger sig ovanpå varandra och avbryter aldrig musiken.
+            De lägger sig ovanpå varandra och avbryter aldrig musiken. En pad kan
+            loopa, och scenen kan ha flera set att växla mellan.
           </p>
         </div>
       </section>

@@ -57,6 +57,20 @@
       "when": 1785789881977,
       "tag": "0007_bumpy_mystique",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786742663213,
+      "tag": "0008_oneshot_sets",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786742694781,
+      "tag": "0009_oneshot_slots_move_to_sets",
+      "breakpoints": true
     }
   ]
 }

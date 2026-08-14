@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ONESHOT_GROUP_ID, useAudioEngine } from "@/audio-engine";
 import { AudioUploader } from "@/components/audio/AudioUploader";
 import { MixerMenu } from "@/components/scenes/MixerMenu";
+import { OneShotSetTabs } from "@/components/scenes/OneShotSetTabs";
 import { SceneArtwork } from "@/components/scenes/SceneArtwork";
 import { SceneTabs } from "@/components/scenes/SceneTabs";
 import { MusicSlotCard } from "@/components/slots/MusicSlotCard";
@@ -31,12 +32,18 @@ import type {
   Collection,
   MixPreset,
   MusicSlot,
+  OneShotSet,
   OneShotSlot,
   Scene,
 } from "@/types/domain";
 
 const musicTrackId = (slotIndex: number) => `music-${slotIndex}`;
-const oneshotTrackId = (slotIndex: number) => `oneshot-${slotIndex}`;
+/**
+ * One-shot pads are addressed by set as well as by slot: two sets can hold the
+ * same slot number, and the engine must be able to keep both loaded — a
+ * looping pad in one set goes on playing while you work in another.
+ */
+const oneshotTrackId = (setId: string, slotIndex: number) => `oneshot-${setId}-${slotIndex}`;
 const MUSIC_COLUMN_SIZE = 5;
 const musicGroupId = (slotIndex: number) => (slotIndex <= MUSIC_COLUMN_SIZE ? "left" : "right");
 /** The only fade lengths on offer — deliberately two presets, not a free-form field. */
@@ -52,6 +59,8 @@ const DEFAULT_SLOT_VOLUME = 0.8;
  */
 const FADE_SETTING_KEY = "lyriad:fade-duration-ms";
 const EMPTY_PADS_SETTING_KEY = "lyriad:show-empty-oneshots";
+/** Which one-shot set this scene was left on, per browser. */
+const ACTIVE_SET_KEY = (sceneId: string) => `lyriad:oneshot-set:${sceneId}`;
 
 /** How far down the page the mixer has to go before the compact transport takes over. */
 const APP_HEADER_HEIGHT_PX = 56;
@@ -66,8 +75,19 @@ function replaceMusicSlot(scene: Scene, slot: MusicSlot): Scene {
 function replaceOneShotSlot(scene: Scene, slot: OneShotSlot): Scene {
   return {
     ...scene,
-    oneShotSlots: scene.oneShotSlots.map((s) => (s.slotIndex === slot.slotIndex ? slot : s)),
+    oneShotSets: scene.oneShotSets.map((set) =>
+      set.id === slot.setId
+        ? { ...set, slots: set.slots.map((s) => (s.slotIndex === slot.slotIndex ? slot : s)) }
+        : set
+    ),
   };
+}
+
+/** The stored slot as the scene currently has it — the value an optimistic edit reverts to. */
+function findOneShotSlot(scene: Scene, setId: string, slotIndex: number): OneShotSlot | undefined {
+  return scene.oneShotSets
+    .find((set) => set.id === setId)
+    ?.slots.find((slot) => slot.slotIndex === slotIndex);
 }
 
 type SceneClientProps = { sceneId: string };
@@ -85,11 +105,14 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   const [notFound, setNotFound] = useState(false);
 
   const [musicLoadState, setMusicLoadState] = useState<Record<number, SlotLoadState>>({});
-  const [oneshotLoadState, setOneshotLoadState] = useState<Record<number, SlotLoadState>>({});
   const [musicAssigning, setMusicAssigning] = useState<Record<number, boolean>>({});
-  const [oneshotAssigning, setOneshotAssigning] = useState<Record<number, boolean>>({});
   const [musicSlotErrors, setMusicSlotErrors] = useState<Record<number, string | null>>({});
-  const [oneshotSlotErrors, setOneshotSlotErrors] = useState<Record<number, string | null>>({});
+  // One-shot state is keyed by the pad's engine id, which carries its set — the
+  // same slot number exists in every set of the scene.
+  const [oneshotLoadState, setOneshotLoadState] = useState<Record<string, SlotLoadState>>({});
+  const [oneshotAssigning, setOneshotAssigning] = useState<Record<string, boolean>>({});
+  const [oneshotSlotErrors, setOneshotSlotErrors] = useState<Record<string, string | null>>({});
+  const [creatingSet, setCreatingSet] = useState(false);
 
   const [collapsedColumns, setCollapsedColumns] = useState<Record<string, boolean>>({});
   /** Ticked fade length, applied to both directions of master play/pause. */
@@ -102,6 +125,14 @@ export function SceneClient({ sceneId }: SceneClientProps) {
    * with three sounds in it was otherwise seventeen dashed rectangles.
    */
   const [showEmptyPads, setShowEmptyPads] = useStoredSetting(EMPTY_PADS_SETTING_KEY, false);
+  /**
+   * The set the pad grid is showing. Remembered per scene: a table that ended
+   * last week in "Strid" opens there again rather than back on the first set.
+   */
+  const [storedSetId, setStoredSetId] = useStoredSetting<string | null>(
+    ACTIVE_SET_KEY(sceneId),
+    null
+  );
 
   /** True once the desk's own transport has scrolled out from under the header. */
   const [transportOffscreen, setTransportOffscreen] = useState(false);
@@ -114,7 +145,8 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   const [deletingScene, setDeletingScene] = useState(false);
 
   const loadedMusicRef = useRef<Record<number, string>>({});
-  const loadedOneshotRef = useRef<Record<number, string>>({});
+  /** Engine pad id → the audio file id currently decoded into it. */
+  const loadedOneshotRef = useRef<Record<string, string>>({});
   const persistTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const {
@@ -141,8 +173,13 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     triggerOneShot,
     stopOneShot,
     setOneShotVolume,
+    setOneShotLoop,
     removeOneShotSlot,
   } = useAudioEngine();
+
+  /** Falls back to the first set whenever the remembered one is gone. */
+  const activeSet =
+    scene?.oneShotSets.find((set) => set.id === storedSetId) ?? scene?.oneShotSets[0] ?? null;
 
   const audioFilesById = useMemo(
     () => new Map(audioFiles.map((f) => [f.id, f])),
@@ -276,23 +313,30 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     }
   }
 
-  async function loadOneshotAudio(slotIndex: number, audioFileId: string, volume: number) {
+  async function loadOneshotAudio(
+    setId: string,
+    slotIndex: number,
+    audioFileId: string,
+    volume: number,
+    loop: boolean
+  ) {
+    const trackId = oneshotTrackId(setId, slotIndex);
     const file = audioFilesById.get(audioFileId);
     if (!file) {
       setOneshotLoadState((prev) => ({
         ...prev,
-        [slotIndex]: { status: "error", message: "Ljudfilen hittades inte i biblioteket" },
+        [trackId]: { status: "error", message: "Ljudfilen hittades inte i biblioteket" },
       }));
       return;
     }
-    setOneshotLoadState((prev) => ({ ...prev, [slotIndex]: { status: "loading" } }));
+    setOneshotLoadState((prev) => ({ ...prev, [trackId]: { status: "loading" } }));
     try {
-      await loadOneShotFromUrl(oneshotTrackId(slotIndex), file.filename, file.playbackUrl, volume);
-      setOneshotLoadState((prev) => ({ ...prev, [slotIndex]: { status: "loaded" } }));
+      await loadOneShotFromUrl(trackId, file.filename, file.playbackUrl, { volume, loop });
+      setOneshotLoadState((prev) => ({ ...prev, [trackId]: { status: "loaded" } }));
     } catch {
       setOneshotLoadState((prev) => ({
         ...prev,
-        [slotIndex]: { status: "error", message: `Kunde inte spela upp "${file.filename}"` },
+        [trackId]: { status: "error", message: `Kunde inte spela upp "${file.filename}"` },
       }));
     }
   }
@@ -315,21 +359,46 @@ export function SceneClient({ sceneId }: SceneClientProps) {
         setMusicLoadState((prev) => ({ ...prev, [slot.slotIndex]: { status: "idle" } }));
       }
     }
-    for (const slot of scene.oneShotSlots) {
-      const trackId = oneshotTrackId(slot.slotIndex);
+    // Only the set on screen is decoded, and what it decodes stays loaded for as
+    // long as the scene is: switching back to a set is instant, and a looping
+    // pad fired in one set keeps playing while another set is showing.
+    for (const slot of activeSet?.slots ?? []) {
+      const trackId = oneshotTrackId(slot.setId, slot.slotIndex);
       if (slot.audioFileId) {
-        if (loadedOneshotRef.current[slot.slotIndex] !== slot.audioFileId) {
-          loadedOneshotRef.current[slot.slotIndex] = slot.audioFileId;
-          void loadOneshotAudio(slot.slotIndex, slot.audioFileId, slot.volume);
+        if (loadedOneshotRef.current[trackId] !== slot.audioFileId) {
+          loadedOneshotRef.current[trackId] = slot.audioFileId;
+          void loadOneshotAudio(
+            slot.setId,
+            slot.slotIndex,
+            slot.audioFileId,
+            slot.volume,
+            slot.loop
+          );
         }
-      } else if (loadedOneshotRef.current[slot.slotIndex]) {
-        delete loadedOneshotRef.current[slot.slotIndex];
+      } else if (loadedOneshotRef.current[trackId]) {
+        delete loadedOneshotRef.current[trackId];
         removeOneShotSlot(trackId);
-        setOneshotLoadState((prev) => ({ ...prev, [slot.slotIndex]: { status: "idle" } }));
+        setOneshotLoadState((prev) => ({ ...prev, [trackId]: { status: "idle" } }));
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-runs only on scene/audioFilesById changes; engine calls are ref-guarded above
-  }, [scene, audioFilesById]);
+
+    // Anything held for a pad the scene no longer has — a deleted set, or a slot
+    // reassigned in a set that isn't showing — goes, playing or not. It decodes
+    // again from its own set's pass above the next time that set is opened.
+    const livePads = new Set(
+      scene.oneShotSets.flatMap((set) =>
+        set.slots
+          .filter((slot) => slot.audioFileId)
+          .map((slot) => `${oneshotTrackId(set.id, slot.slotIndex)}:${slot.audioFileId}`)
+      )
+    );
+    for (const [trackId, audioFileId] of Object.entries(loadedOneshotRef.current)) {
+      if (livePads.has(`${trackId}:${audioFileId}`)) continue;
+      delete loadedOneshotRef.current[trackId];
+      removeOneShotSlot(trackId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-runs only on scene/active set/audioFilesById changes; engine calls are ref-guarded above
+  }, [scene, activeSet?.id, audioFilesById]);
 
   function schedulePersist(key: string, fn: () => void, delay = 500) {
     const timers = persistTimers.current;
@@ -367,11 +436,12 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   }
 
   async function patchOneShotSlot(
+    setId: string,
     slotIndex: number,
     body: Record<string, unknown>
   ): Promise<{ ok: boolean; status: number; error?: string }> {
     try {
-      const res = await fetch(`/api/scenes/${sceneId}/oneshot-slots/${slotIndex}`, {
+      const res = await fetch(`/api/scenes/${sceneId}/oneshot-sets/${setId}/slots/${slotIndex}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -458,49 +528,52 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     setMusicAssigning((prev) => ({ ...prev, [slotIndex]: false }));
   }
 
-  async function assignOneShotSlot(slotIndex: number, audioFileId: string) {
-    setOneshotAssigning((prev) => ({ ...prev, [slotIndex]: true }));
-    setOneshotSlotErrors((prev) => ({ ...prev, [slotIndex]: null }));
-    const result = await patchOneShotSlot(slotIndex, { audioFileId, name: null });
+  async function assignOneShotSlot(setId: string, slotIndex: number, audioFileId: string) {
+    const trackId = oneshotTrackId(setId, slotIndex);
+    setOneshotAssigning((prev) => ({ ...prev, [trackId]: true }));
+    setOneshotSlotErrors((prev) => ({ ...prev, [trackId]: null }));
+    const result = await patchOneShotSlot(setId, slotIndex, { audioFileId, name: null });
     if (!result.ok) {
       if (result.status === 409) {
         setOneshotSlotErrors((prev) => ({
           ...prev,
-          [slotIndex]: "Platsen är redan upptagen av en annan fil.",
+          [trackId]: "Platsen är redan upptagen av en annan fil.",
         }));
         await fetchAll();
       } else {
         setOneshotSlotErrors((prev) => ({
           ...prev,
-          [slotIndex]: result.error ?? "Kunde inte tilldela platsen",
+          [trackId]: result.error ?? "Kunde inte tilldela platsen",
         }));
       }
     }
-    setOneshotAssigning((prev) => ({ ...prev, [slotIndex]: false }));
+    setOneshotAssigning((prev) => ({ ...prev, [trackId]: false }));
   }
 
-  async function clearOneShotSlot(slotIndex: number) {
-    const previous = scene?.oneShotSlots.find((s) => s.slotIndex === slotIndex);
-    setOneshotAssigning((prev) => ({ ...prev, [slotIndex]: true }));
-    const result = await patchOneShotSlot(slotIndex, { audioFileId: null, name: null });
+  async function clearOneShotSlot(setId: string, slotIndex: number) {
+    const trackId = oneshotTrackId(setId, slotIndex);
+    const previous = scene ? findOneShotSlot(scene, setId, slotIndex) : undefined;
+    setOneshotAssigning((prev) => ({ ...prev, [trackId]: true }));
+    const result = await patchOneShotSlot(setId, slotIndex, { audioFileId: null, name: null });
     if (result.ok) {
-      setOneshotSlotErrors((prev) => ({ ...prev, [slotIndex]: null }));
+      setOneshotSlotErrors((prev) => ({ ...prev, [trackId]: null }));
       if (previous?.audioFileId) {
         notify(`One-shot ${slotIndex} rensades.`, {
           tone: "info",
           action: {
             label: "Ångra",
             onAction: () =>
-              void patchOneShotSlot(slotIndex, {
+              void patchOneShotSlot(setId, slotIndex, {
                 audioFileId: previous.audioFileId,
                 name: previous.name,
                 volume: previous.volume,
+                loop: previous.loop,
               }),
           },
         });
       }
     }
-    setOneshotAssigning((prev) => ({ ...prev, [slotIndex]: false }));
+    setOneshotAssigning((prev) => ({ ...prev, [trackId]: false }));
   }
 
   function handleMusicVolume(slotIndex: number, volume: number) {
@@ -650,34 +723,51 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     }
   }
 
-  function handleOneShotVolume(slotIndex: number, volume: number) {
-    const trackId = oneshotTrackId(slotIndex);
-    const previous = scene?.oneShotSlots.find((s) => s.slotIndex === slotIndex)?.volume;
+  function handleOneShotVolume(setId: string, slotIndex: number, volume: number) {
+    const trackId = oneshotTrackId(setId, slotIndex);
+    const previous = scene ? findOneShotSlot(scene, setId, slotIndex)?.volume : undefined;
     if (oneShots[trackId]) setOneShotVolume(trackId, volume);
-    setScene((prev) =>
-      prev
-        ? replaceOneShotSlot(prev, {
-            ...prev.oneShotSlots.find((s) => s.slotIndex === slotIndex)!,
-            volume,
-          })
-        : prev
-    );
-    schedulePersist(`oneshot-volume-${slotIndex}`, () =>
+    setScene((prev) => {
+      const slot = prev ? findOneShotSlot(prev, setId, slotIndex) : undefined;
+      return prev && slot ? replaceOneShotSlot(prev, { ...slot, volume }) : prev;
+    });
+    schedulePersist(`oneshot-volume-${trackId}`, () =>
       persist(
-        () => patchOneShotSlot(slotIndex, { volume }),
+        () => patchOneShotSlot(setId, slotIndex, { volume }),
         () => {
           if (previous === undefined) return;
-          setScene((prev) =>
-            prev
-              ? replaceOneShotSlot(prev, {
-                  ...prev.oneShotSlots.find((s) => s.slotIndex === slotIndex)!,
-                  volume: previous,
-                })
-              : prev
-          );
+          setScene((prev) => {
+            const slot = prev ? findOneShotSlot(prev, setId, slotIndex) : undefined;
+            return prev && slot ? replaceOneShotSlot(prev, { ...slot, volume: previous }) : prev;
+          });
         },
         `Volymen för one-shot ${slotIndex} kunde inte sparas.`
       )
+    );
+  }
+
+  /**
+   * A looping pad plays until it is pressed again. The engine is told first so
+   * a sound already in flight starts (or stops) repeating immediately, rather
+   * than only from the next press.
+   */
+  function handleOneShotLoop(setId: string, slotIndex: number, loop: boolean) {
+    const trackId = oneshotTrackId(setId, slotIndex);
+    if (oneShots[trackId]) setOneShotLoop(trackId, loop);
+    setScene((prev) => {
+      const slot = prev ? findOneShotSlot(prev, setId, slotIndex) : undefined;
+      return prev && slot ? replaceOneShotSlot(prev, { ...slot, loop }) : prev;
+    });
+    persist(
+      () => patchOneShotSlot(setId, slotIndex, { loop }),
+      () => {
+        if (oneShots[trackId]) setOneShotLoop(trackId, !loop);
+        setScene((prev) => {
+          const slot = prev ? findOneShotSlot(prev, setId, slotIndex) : undefined;
+          return prev && slot ? replaceOneShotSlot(prev, { ...slot, loop: !loop }) : prev;
+        });
+      },
+      `Loopinställningen för one-shot ${slotIndex} kunde inte sparas.`
     );
   }
 
@@ -707,9 +797,13 @@ export function SceneClient({ sceneId }: SceneClientProps) {
       const trackId = musicTrackId(slot.slotIndex);
       if (tracks[trackId]) stop(trackId);
     }
-    for (const slot of scene.oneShotSlots) {
-      const trackId = oneshotTrackId(slot.slotIndex);
-      if (oneShots[trackId]) stopOneShot(trackId);
+    // Every set, not just the one on screen: a looping pad left running in
+    // another set is exactly what "Återställ ljud" is for.
+    for (const set of scene.oneShotSets) {
+      for (const slot of set.slots) {
+        const trackId = oneshotTrackId(set.id, slot.slotIndex);
+        if (oneShots[trackId]) stopOneShot(trackId);
+      }
     }
 
     setMasterVolume(DEFAULT_BUS_VOLUME);
@@ -722,9 +816,11 @@ export function SceneClient({ sceneId }: SceneClientProps) {
         handleMusicVolume(slot.slotIndex, DEFAULT_SLOT_VOLUME);
       }
     }
-    for (const slot of scene.oneShotSlots) {
-      if (slot.volume !== DEFAULT_SLOT_VOLUME) {
-        handleOneShotVolume(slot.slotIndex, DEFAULT_SLOT_VOLUME);
+    for (const set of scene.oneShotSets) {
+      for (const slot of set.slots) {
+        if (slot.volume !== DEFAULT_SLOT_VOLUME) {
+          handleOneShotVolume(set.id, slot.slotIndex, DEFAULT_SLOT_VOLUME);
+        }
       }
     }
   }
@@ -742,29 +838,106 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     router.push("/scenes");
   }
 
-  function handleOneShotName(slotIndex: number, name: string | null) {
-    const previous = scene?.oneShotSlots.find((s) => s.slotIndex === slotIndex)?.name ?? null;
-    setScene((prev) =>
-      prev
-        ? replaceOneShotSlot(prev, {
-            ...prev.oneShotSlots.find((s) => s.slotIndex === slotIndex)!,
-            name,
-          })
-        : prev
-    );
+  function handleOneShotName(setId: string, slotIndex: number, name: string | null) {
+    const previous = scene ? (findOneShotSlot(scene, setId, slotIndex)?.name ?? null) : null;
+    setScene((prev) => {
+      const slot = prev ? findOneShotSlot(prev, setId, slotIndex) : undefined;
+      return prev && slot ? replaceOneShotSlot(prev, { ...slot, name }) : prev;
+    });
     persist(
-      () => patchOneShotSlot(slotIndex, { name }),
+      () => patchOneShotSlot(setId, slotIndex, { name }),
       () =>
-        setScene((prev) =>
-          prev
-            ? replaceOneShotSlot(prev, {
-                ...prev.oneShotSlots.find((s) => s.slotIndex === slotIndex)!,
-                name: previous,
-              })
-            : prev
-        ),
+        setScene((prev) => {
+          const slot = prev ? findOneShotSlot(prev, setId, slotIndex) : undefined;
+          return prev && slot ? replaceOneShotSlot(prev, { ...slot, name: previous }) : prev;
+        }),
       "Namnet kunde inte sparas."
     );
+  }
+
+  async function createOneShotSet() {
+    if (!scene) return;
+    setCreatingSet(true);
+    try {
+      const res = await fetch(`/api/scenes/${sceneId}/oneshot-sets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: `Set ${scene.oneShotSets.length + 1}` }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        notify(body?.error ?? "Kunde inte skapa setet", { tone: "danger" });
+        return;
+      }
+      const { set }: { set: OneShotSet } = await res.json();
+      setScene((prev) => (prev ? { ...prev, oneShotSets: [...prev.oneShotSets, set] } : prev));
+      // A new, empty set is only worth making if you land in it.
+      setStoredSetId(set.id);
+    } catch {
+      notify("Kunde inte skapa setet", { tone: "danger" });
+    } finally {
+      setCreatingSet(false);
+    }
+  }
+
+  function renameOneShotSet(setId: string, name: string) {
+    const previous = scene?.oneShotSets.find((s) => s.id === setId)?.name;
+    if (previous === undefined || name === previous) return;
+    const apply = (value: string) =>
+      setScene((prev) =>
+        prev
+          ? {
+              ...prev,
+              oneShotSets: prev.oneShotSets.map((s) =>
+                s.id === setId ? { ...s, name: value } : s
+              ),
+            }
+          : prev
+      );
+    apply(name);
+    persist(
+      async () => {
+        const res = await fetch(`/api/scenes/${sceneId}/oneshot-sets/${setId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        }).catch(() => null);
+        return { ok: res?.ok ?? false };
+      },
+      () => apply(previous),
+      "Namnet på setet kunde inte sparas."
+    );
+  }
+
+  /**
+   * Deleting a set throws away up to twenty assignments at once, so unlike a
+   * single pad this one asks first — there is no undo that could put the whole
+   * bank back.
+   */
+  async function deleteOneShotSet(setId: string) {
+    if (!scene) return;
+    const set = scene.oneShotSets.find((s) => s.id === setId);
+    if (!set) return;
+    const filled = set.slots.filter((slot) => slot.audioFileId).length;
+    const confirmed = window.confirm(
+      filled > 0
+        ? `Radera "${set.name}" med ${filled} ljud?`
+        : `Radera "${set.name}"?`
+    );
+    if (!confirmed) return;
+
+    const res = await fetch(`/api/scenes/${sceneId}/oneshot-sets/${setId}`, {
+      method: "DELETE",
+    }).catch(() => null);
+    if (!res?.ok) {
+      const body = await res?.json().catch(() => null);
+      notify(body?.error ?? "Kunde inte radera setet", { tone: "danger" });
+      return;
+    }
+    setScene((prev) =>
+      prev ? { ...prev, oneShotSets: prev.oneShotSets.filter((s) => s.id !== setId) } : prev
+    );
+    if (storedSetId === setId) setStoredSetId(null);
   }
 
   function applyMixPreset(preset: MixPreset) {
@@ -869,12 +1042,13 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   const transportStatus =
     loadedMusicTrackIds.length === 0 ? "Inga spår laddade" : anyMusicPlaying ? "Spelar" : "Pausad";
 
-  const filledOneShots = scene.oneShotSlots.filter((s) => s.audioFileId);
-  const firstFreeOneShot = scene.oneShotSlots.find((s) => !s.audioFileId);
+  const activeSetSlots = activeSet?.slots ?? [];
+  const filledOneShots = activeSetSlots.filter((s) => s.audioFileId);
+  const firstFreeOneShot = activeSetSlots.find((s) => !s.audioFileId);
   // Collapsed, the grid shows what is filled plus one way in — twenty dashed
   // rectangles is a lot of nothing to look at on a scene with three sounds.
   const visibleOneShots = showEmptyPads
-    ? scene.oneShotSlots
+    ? activeSetSlots
     : [...filledOneShots, ...(firstFreeOneShot ? [firstFreeOneShot] : [])];
   // Named for what they are rather than where they sit: below `sm` the two
   // columns stack, at which point "the left one" is describing nothing.
@@ -1013,6 +1187,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
           >
             <AudioUploader
               sceneId={sceneId}
+              oneShotSetId={activeSet?.id}
               onUploaded={() => void fetchAll()}
               onAssigned={() => void fetchAll()}
             />
@@ -1187,7 +1362,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
             One-shots
           </h2>
           <span className="flex-none font-mono text-xs text-muted-foreground">
-            {filledOneShots.length}/{scene.oneShotSlots.length}
+            {filledOneShots.length}/{activeSetSlots.length}
           </span>
 
           <div className="flex min-w-0 flex-1 items-center justify-center gap-2 sm:max-w-xs">
@@ -1243,6 +1418,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
               <AudioUploader
                 category="oneshot"
                 sceneId={sceneId}
+                oneShotSetId={activeSet?.id}
                 onUploaded={() => void fetchAll()}
                 onAssigned={() => void fetchAll()}
               />
@@ -1250,30 +1426,58 @@ export function SceneClient({ sceneId }: SceneClientProps) {
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-10">
-          {visibleOneShots.map((slot) => (
-            <OneShotPad
-              key={slot.slotIndex}
-              slot={slot}
-              file={slot.audioFileId ? (audioFilesById.get(slot.audioFileId) ?? null) : null}
-              libraryFiles={oneshotLibraryFiles}
-              collections={collections}
-              oneShot={oneShots[oneshotTrackId(slot.slotIndex)]}
-              loadState={oneshotLoadState[slot.slotIndex] ?? { status: "idle" }}
-              assigning={oneshotAssigning[slot.slotIndex] ?? false}
-              assignError={oneshotSlotErrors[slot.slotIndex] ?? null}
-              onAssign={(audioFileId) => void assignOneShotSlot(slot.slotIndex, audioFileId)}
-              onClear={() => void clearOneShotSlot(slot.slotIndex)}
-              onRetry={() => {
-                if (slot.audioFileId)
-                  void loadOneshotAudio(slot.slotIndex, slot.audioFileId, slot.volume);
-              }}
-              onTrigger={() => triggerOneShot(oneshotTrackId(slot.slotIndex))}
-              onStop={() => stopOneShot(oneshotTrackId(slot.slotIndex))}
-              onVolumeChange={(volume) => handleOneShotVolume(slot.slotIndex, volume)}
-              onRename={(name) => handleOneShotName(slot.slotIndex, name)}
+        {activeSet && (
+          <div className="mt-4 flex items-center gap-2">
+            <OneShotSetTabs
+              sets={scene.oneShotSets}
+              activeSetId={activeSet.id}
+              onSelect={setStoredSetId}
+              onCreate={() => void createOneShotSet()}
+              onRename={renameOneShotSet}
+              onDelete={(setId) => void deleteOneShotSet(setId)}
+              creating={creatingSet}
             />
-          ))}
+          </div>
+        )}
+
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-10">
+          {visibleOneShots.map((slot) => {
+            const trackId = oneshotTrackId(slot.setId, slot.slotIndex);
+            return (
+              <OneShotPad
+                key={trackId}
+                slot={slot}
+                file={slot.audioFileId ? (audioFilesById.get(slot.audioFileId) ?? null) : null}
+                libraryFiles={oneshotLibraryFiles}
+                collections={collections}
+                oneShot={oneShots[trackId]}
+                loadState={oneshotLoadState[trackId] ?? { status: "idle" }}
+                assigning={oneshotAssigning[trackId] ?? false}
+                assignError={oneshotSlotErrors[trackId] ?? null}
+                onAssign={(audioFileId) =>
+                  void assignOneShotSlot(slot.setId, slot.slotIndex, audioFileId)
+                }
+                onClear={() => void clearOneShotSlot(slot.setId, slot.slotIndex)}
+                onRetry={() => {
+                  if (slot.audioFileId)
+                    void loadOneshotAudio(
+                      slot.setId,
+                      slot.slotIndex,
+                      slot.audioFileId,
+                      slot.volume,
+                      slot.loop
+                    );
+                }}
+                onTrigger={() => triggerOneShot(trackId)}
+                onStop={() => stopOneShot(trackId)}
+                onVolumeChange={(volume) =>
+                  handleOneShotVolume(slot.setId, slot.slotIndex, volume)
+                }
+                onLoopChange={(loop) => handleOneShotLoop(slot.setId, slot.slotIndex, loop)}
+                onRename={(name) => handleOneShotName(slot.setId, slot.slotIndex, name)}
+              />
+            );
+          })}
         </div>
       </section>
 

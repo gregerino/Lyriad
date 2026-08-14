@@ -8,13 +8,24 @@ export type MusicSlot = {
 };
 
 export type OneShotSlot = {
-  sceneId: string;
+  setId: string;
   slotIndex: number; // 1-20
   audioFileId: string | null;
   name: string | null;
   volume: number; // 0-1
+  /** A looping pad plays until it is pressed again rather than firing once. */
+  loop: boolean;
   color: string | null;
   icon: string | null;
+};
+
+/** One bank of one-shot pads. A scene always has at least one. */
+export type OneShotSet = {
+  id: string;
+  sceneId: string;
+  name: string;
+  position: number;
+  slots: OneShotSlot[];
 };
 
 export type AudioCategory = "music" | "oneshot";
@@ -57,7 +68,7 @@ export type Scene = {
   description: string | null;
   favorite: boolean;
   musicSlots: MusicSlot[];
-  oneShotSlots: OneShotSlot[];
+  oneShotSets: OneShotSet[];
   createdAt: string;
   updatedAt: string;
 };

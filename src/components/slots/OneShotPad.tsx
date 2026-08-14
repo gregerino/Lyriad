@@ -6,7 +6,7 @@ import { Popover } from "@/components/ui/Popover";
 import { RenameMenuItem } from "@/components/ui/RenameMenuItem";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { VolumeSlider } from "@/components/ui/VolumeSlider";
-import { KebabIcon, PlusIcon, SpeakerOnIcon } from "@/components/ui/icons";
+import { KebabIcon, LoopIcon, PlusIcon, SpeakerOnIcon } from "@/components/ui/icons";
 import { stripExtension } from "@/lib/audio/limits";
 import type { OneShotState } from "@/audio-engine";
 import type { AudioFileWithMeta, Collection, OneShotSlot } from "@/types/domain";
@@ -31,6 +31,7 @@ type OneShotPadProps = {
   onTrigger: () => void;
   onStop: () => void;
   onVolumeChange: (volume: number) => void;
+  onLoopChange: (loop: boolean) => void;
   onRename: (name: string | null) => void;
 };
 
@@ -49,6 +50,7 @@ export function OneShotPad({
   onTrigger,
   onStop,
   onVolumeChange,
+  onLoopChange,
   onRename,
 }: OneShotPadProps) {
   const [pulseKey, setPulseKey] = useState(0);
@@ -140,7 +142,13 @@ export function OneShotPad({
         onClick={handlePress}
         disabled={loadState.status !== "loaded"}
         aria-pressed={isActive}
-        aria-label={isActive ? `Stoppa ${displayName}` : `Spela ${displayName}`}
+        aria-label={
+          isActive
+            ? `Stoppa ${displayName}`
+            : slot.loop
+              ? `Spela ${displayName} i loop`
+              : `Spela ${displayName}`
+        }
         className={`focus-ring relative isolate flex h-14 w-full items-center overflow-hidden rounded-lg border px-3 text-left transition enabled:active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${
           isActive
             ? "border-ember-400/60 bg-ember-400/10"
@@ -155,6 +163,15 @@ export function OneShotPad({
         >
           {displayName}
         </span>
+        {/* A looping pad behaves differently from every other one — it keeps
+            going until it is pressed again — so it says so on its face. */}
+        {slot.loop && loadState.status === "loaded" && (
+          <LoopIcon
+            className={`absolute bottom-1 left-3 z-10 h-3 w-3 ${
+              isActive ? "text-ember-300" : "text-muted-foreground"
+            }`}
+          />
+        )}
         {oneShot && oneShot.activeCount > 1 && (
           <span className="absolute bottom-1.5 right-1.5 z-10 rounded-full bg-ember-400 px-1.5 text-[11px] font-semibold text-ink-950">
             {oneShot.activeCount}
@@ -198,6 +215,16 @@ export function OneShotPad({
                 onDone={close}
                 itemClassName={MENU_ITEM_CLASS}
               />
+
+              <button
+                type="button"
+                onClick={() => onLoopChange(!slot.loop)}
+                aria-pressed={slot.loop}
+                className={`${MENU_ITEM_CLASS} ${slot.loop ? "text-ember-300" : ""}`}
+              >
+                <LoopIcon className="h-3.5 w-3.5 flex-none" />
+                {slot.loop ? "Loop på" : "Loop av"}
+              </button>
 
               {oneShot && (
                 <div className="flex items-center gap-2 px-2 text-xs text-parchment-200">

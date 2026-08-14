@@ -97,19 +97,24 @@ export function useAudioEngine() {
   );
 
   const loadOneShot = useCallback(
-    async (id: string, file: File, initialVolume?: number) => {
+    async (id: string, file: File, options?: { volume?: number; loop?: boolean }) => {
       const data = await file.arrayBuffer();
-      await engine.loadOneShot(id, file.name, data, initialVolume);
+      await engine.loadOneShot(id, file.name, data, options);
     },
     [engine],
   );
 
   const loadOneShotFromUrl = useCallback(
-    async (id: string, name: string, url: string, initialVolume?: number) => {
+    async (
+      id: string,
+      name: string,
+      url: string,
+      options?: { volume?: number; loop?: boolean },
+    ) => {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Kunde inte hämta ljudfilen (${res.status})`);
       const data = await res.arrayBuffer();
-      await engine.loadOneShot(id, name, data, initialVolume);
+      await engine.loadOneShot(id, name, data, options);
     },
     [engine],
   );
@@ -117,6 +122,10 @@ export function useAudioEngine() {
   const stopOneShot = useCallback((id: string) => engine.stopOneShot(id), [engine]);
   const setOneShotVolume = useCallback(
     (id: string, volume: number) => engine.setOneShotVolume(id, volume),
+    [engine],
+  );
+  const setOneShotLoop = useCallback(
+    (id: string, loop: boolean) => engine.setOneShotLoop(id, loop),
     [engine],
   );
   const removeOneShotSlot = useCallback((id: string) => engine.removeOneShotSlot(id), [engine]);
@@ -147,6 +156,7 @@ export function useAudioEngine() {
     triggerOneShot,
     stopOneShot,
     setOneShotVolume,
+    setOneShotLoop,
     removeOneShotSlot,
   };
 }

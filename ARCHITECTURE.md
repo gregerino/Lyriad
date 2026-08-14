@@ -89,26 +89,47 @@ CREATE TABLE scene_music_slots (
   PRIMARY KEY (scene_id, slot_index)
 );
 
-CREATE TABLE scene_oneshot_slots (
+CREATE TABLE scene_oneshot_sets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   scene_id UUID NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  position SMALLINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE scene_oneshot_slots (
+  set_id UUID NOT NULL REFERENCES scene_oneshot_sets(id) ON DELETE CASCADE,
   slot_index SMALLINT NOT NULL CHECK (slot_index BETWEEN 1 AND 20),
   audio_file_id UUID REFERENCES audio_files(id) ON DELETE SET NULL,
   volume REAL NOT NULL DEFAULT 0.8 CHECK (volume BETWEEN 0 AND 1),
+  loop BOOLEAN NOT NULL DEFAULT false,
   color TEXT,
   icon TEXT,
-  PRIMARY KEY (scene_id, slot_index)
+  PRIMARY KEY (set_id, slot_index)
 );
 ```
 
-**Designbeslut:** `PRIMARY KEY (scene_id, slot_index)` ger både uniknyckeln
-och gräns-på-antal-rader gratis — `slot_index` är begränsat till 1–10
-(musik) respektive 1–20 (one-shots) via `CHECK`, så fler rader per scen än
-så kan aldrig existera. Ingen trigger behövs.
+**Designbeslut:** `PRIMARY KEY (scene_id, slot_index)` respektive
+`(set_id, slot_index)` ger både uniknyckeln och gräns-på-antal-rader gratis
+— `slot_index` är begränsat till 1–10 (musik) respektive 1–20 (one-shots)
+via `CHECK`, så fler rader per scen/set än så kan aldrig existera. Ingen
+trigger behövs.
 
-När en scen skapas skapas samtidigt alla 10 + 20 slot-rader (med
-`audio_file_id = NULL`) i samma transaktion. Det gör att frontend alltid
-kan förvänta sig fasta arrayer av längd 10/20 per scen, utan att särskilja
-"tom plats" från "plats finns inte".
+**One-shot-set:** en scen kan ha flera banker av one-shots ("Strid",
+"Krogen", "Resan") och paddgriden visar en i taget. Setet är en egen tabell
+snarare än ett index i slot-nyckeln, eftersom det har ett namn och en
+ordning som användaren redigerar. En scen har alltid minst ett set —
+API:et vägrar radera det sista.
+
+När en scen skapas skapas samtidigt alla 10 musikrader, ett förvalt set och
+dess 20 slot-rader (med `audio_file_id = NULL`) i samma transaktion. Det gör
+att frontend alltid kan förvänta sig fasta arrayer av längd 10/20, utan att
+särskilja "tom plats" från "plats finns inte".
+
+**Loop på one-shots:** `loop` på slot-raden gör att padden spelar tills den
+trycks igen istället för att avfyras en gång — regn, en folkmassa, en eld.
+Musikslottens `loop` defaultar till `true`, one-shottens till `false`,
+eftersom det är vad respektive sorts ljud oftast ska göra.
 
 ## 4. Ljudfillagring (Cloudflare R2)
 
@@ -180,10 +201,14 @@ att kunna mixa flera samtidiga spår med individuell gain/fade:
   in/ut sker med `GainNode.gain.linearRampToValueAtTime`. Flera musikspår
   kan vara aktiva samtidigt (mixade) eller styras att vara exklusiva,
   beroende på scenens inställning.
-- **One-shots (20 platser):** varje klick skapar en ny
+- **One-shots (20 platser per set):** varje klick skapar en ny
   `AudioBufferSourceNode` (fire-and-forget) routad genom en delad
   one-shot-gain → master, så överlappande triggers fungerar utan att
-  avbryta varandra.
+  avbryta varandra. En pad med `loop` sätter `source.loop` på instansen och
+  spelar tills padden trycks igen (`stopOneShot`). Padden adresseras med
+  `oneshot-<setId>-<slotIndex>`, så ett loopande ljud i ett set fortsätter
+  spela medan ett annat set visas — bara det set som visas avkodas, och det
+  som avkodats ligger kvar så länge scenen är öppen.
 - Ljudfiler decodas till `AudioBuffer` en gång och cachas i minnet
   (`Map<audioFileId, AudioBuffer>`) för att undvika omdecodning vid varje
   trigger.
@@ -217,7 +242,12 @@ PATCH  /api/scenes/:id                 Uppdatera namn/beskrivning
 DELETE /api/scenes/:id                 Radera scen (cascade slots)
 
 PATCH  /api/scenes/:id/music-slots/:slotIndex     Uppdatera slot (audio_file_id, volym, loop, fade)
-PATCH  /api/scenes/:id/oneshot-slots/:slotIndex   Uppdatera slot (audio_file_id, volym, färg/ikon)
+
+POST   /api/scenes/:id/oneshot-sets               Skapa set (+ dess 20 slot-rader)
+PATCH  /api/scenes/:id/oneshot-sets/:setId        Byt namn/ordning på setet
+DELETE /api/scenes/:id/oneshot-sets/:setId        Radera set (409 om det är det sista)
+PATCH  /api/scenes/:id/oneshot-sets/:setId/slots/:slotIndex
+                                                  Uppdatera slot (audio_file_id, volym, loop, färg/ikon)
 
 GET    /api/audio-files                Lista uppladdade filer
 POST   /api/audio-files/upload-url     Begär presignerad uppladdnings-URL (R2 eller lokal)

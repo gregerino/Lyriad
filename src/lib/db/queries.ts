@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   audioFileCollections,
@@ -7,6 +7,7 @@ import {
   collections,
   sceneMixPresets,
   sceneMusicSlots,
+  sceneOneshotSets,
   sceneOneshotSlots,
   scenes,
 } from "./schema";
@@ -16,12 +17,15 @@ import type {
   Collection,
   MixPreset,
   MusicSlot,
+  OneShotSet,
   OneShotSlot,
   Scene,
 } from "@/types/domain";
 
 const MUSIC_SLOT_COUNT = 10;
 const ONESHOT_SLOT_COUNT = 20;
+/** What the set every new scene starts with is called. */
+const DEFAULT_ONESHOT_SET_NAME = "Set 1";
 
 function toMusicSlot(row: typeof sceneMusicSlots.$inferSelect): MusicSlot {
   return {
@@ -36,11 +40,12 @@ function toMusicSlot(row: typeof sceneMusicSlots.$inferSelect): MusicSlot {
 
 function toOneShotSlot(row: typeof sceneOneshotSlots.$inferSelect): OneShotSlot {
   return {
-    sceneId: row.sceneId,
+    setId: row.setId,
     slotIndex: row.slotIndex,
     audioFileId: row.audioFileId,
     name: row.name,
     volume: row.volume,
+    loop: row.loop,
     color: row.color,
     icon: row.icon,
   };
@@ -79,29 +84,66 @@ function toMixPreset(row: typeof sceneMixPresets.$inferSelect): MixPreset {
   };
 }
 
+/**
+ * The one-shot sets of a scene, each carrying its own twenty slots. Fetched as
+ * two flat queries and stitched here rather than as a join, so a set that is
+ * somehow missing rows still comes back as a set.
+ */
+async function loadOneShotSets(sceneId: string): Promise<OneShotSet[]> {
+  const setRows = await db
+    .select()
+    .from(sceneOneshotSets)
+    .where(eq(sceneOneshotSets.sceneId, sceneId))
+    .orderBy(asc(sceneOneshotSets.position), asc(sceneOneshotSets.createdAt));
+  if (setRows.length === 0) return [];
+
+  const slotRows = await db
+    .select()
+    .from(sceneOneshotSlots)
+    .where(
+      inArray(
+        sceneOneshotSlots.setId,
+        setRows.map((s) => s.id)
+      )
+    )
+    .orderBy(asc(sceneOneshotSlots.slotIndex));
+
+  const slotsBySet = new Map<string, OneShotSlot[]>();
+  for (const row of slotRows) {
+    const slot = toOneShotSlot(row);
+    const existing = slotsBySet.get(slot.setId);
+    if (existing) existing.push(slot);
+    else slotsBySet.set(slot.setId, [slot]);
+  }
+
+  return setRows.map((row) => ({
+    id: row.id,
+    sceneId: row.sceneId,
+    name: row.name,
+    position: row.position,
+    slots: slotsBySet.get(row.id) ?? [],
+  }));
+}
+
 async function loadSceneSlots(sceneId: string) {
-  const [musicRows, oneshotRows] = await Promise.all([
+  const [musicRows, oneShotSets] = await Promise.all([
     db
       .select()
       .from(sceneMusicSlots)
       .where(eq(sceneMusicSlots.sceneId, sceneId))
       .orderBy(asc(sceneMusicSlots.slotIndex)),
-    db
-      .select()
-      .from(sceneOneshotSlots)
-      .where(eq(sceneOneshotSlots.sceneId, sceneId))
-      .orderBy(asc(sceneOneshotSlots.slotIndex)),
+    loadOneShotSets(sceneId),
   ]);
 
   return {
     musicSlots: musicRows.map(toMusicSlot),
-    oneShotSlots: oneshotRows.map(toOneShotSlot),
+    oneShotSets,
   };
 }
 
 function toScene(
   row: typeof scenes.$inferSelect,
-  slots: { musicSlots: MusicSlot[]; oneShotSlots: OneShotSlot[] }
+  slots: { musicSlots: MusicSlot[]; oneShotSets: OneShotSet[] }
 ): Scene {
   return {
     id: row.id,
@@ -109,7 +151,7 @@ function toScene(
     description: row.description,
     favorite: row.favorite,
     musicSlots: slots.musicSlots,
-    oneShotSlots: slots.oneShotSlots,
+    oneShotSets: slots.oneShotSets,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -142,12 +184,9 @@ export async function createScene(input: {
   description: string | null;
 }): Promise<Scene> {
   const id = randomUUID();
+  const setId = randomUUID();
 
   const musicSlotValues = Array.from({ length: MUSIC_SLOT_COUNT }, (_, i) => ({
-    sceneId: id,
-    slotIndex: i + 1,
-  }));
-  const oneshotSlotValues = Array.from({ length: ONESHOT_SLOT_COUNT }, (_, i) => ({
     sceneId: id,
     slotIndex: i + 1,
   }));
@@ -155,7 +194,10 @@ export async function createScene(input: {
   await db.batch([
     db.insert(scenes).values({ id, name: input.name, description: input.description }),
     db.insert(sceneMusicSlots).values(musicSlotValues),
-    db.insert(sceneOneshotSlots).values(oneshotSlotValues),
+    db
+      .insert(sceneOneshotSets)
+      .values({ id: setId, sceneId: id, name: DEFAULT_ONESHOT_SET_NAME, position: 0 }),
+    db.insert(sceneOneshotSlots).values(oneShotSlotValues(setId)),
   ]);
 
   const scene = await getSceneWithSlots(id);
@@ -230,27 +272,111 @@ export async function updateMusicSlot(
   return row ? toMusicSlot(row) : null;
 }
 
-export async function getOneShotSlot(
+function oneShotSlotValues(setId: string) {
+  return Array.from({ length: ONESHOT_SLOT_COUNT }, (_, i) => ({
+    setId,
+    slotIndex: i + 1,
+  }));
+}
+
+/** Resolves a set within a scene — the ownership check every set-scoped route needs. */
+export async function getOneShotSet(
   sceneId: string,
+  setId: string
+): Promise<OneShotSet | null> {
+  const [row] = await db
+    .select()
+    .from(sceneOneshotSets)
+    .where(and(eq(sceneOneshotSets.sceneId, sceneId), eq(sceneOneshotSets.id, setId)))
+    .limit(1);
+  if (!row) return null;
+
+  const slotRows = await db
+    .select()
+    .from(sceneOneshotSlots)
+    .where(eq(sceneOneshotSlots.setId, setId))
+    .orderBy(asc(sceneOneshotSlots.slotIndex));
+
+  return {
+    id: row.id,
+    sceneId: row.sceneId,
+    name: row.name,
+    position: row.position,
+    slots: slotRows.map(toOneShotSlot),
+  };
+}
+
+export async function countOneShotSets(sceneId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(sceneOneshotSets)
+    .where(eq(sceneOneshotSets.sceneId, sceneId));
+  return row?.count ?? 0;
+}
+
+/** Adds an empty set at the end of the scene's tab row, slots and all. */
+export async function createOneShotSet(sceneId: string, name: string): Promise<OneShotSet> {
+  const [last] = await db
+    .select({ position: sceneOneshotSets.position })
+    .from(sceneOneshotSets)
+    .where(eq(sceneOneshotSets.sceneId, sceneId))
+    .orderBy(desc(sceneOneshotSets.position))
+    .limit(1);
+
+  const id = randomUUID();
+  await db.batch([
+    db
+      .insert(sceneOneshotSets)
+      .values({ id, sceneId, name, position: (last?.position ?? -1) + 1 }),
+    db.insert(sceneOneshotSlots).values(oneShotSlotValues(id)),
+  ]);
+
+  const set = await getOneShotSet(sceneId, id);
+  if (!set) throw new Error("Failed to load one-shot set after creation");
+  return set;
+}
+
+export async function updateOneShotSet(
+  sceneId: string,
+  setId: string,
+  patch: Partial<{ name: string; position: number }>
+): Promise<OneShotSet | null> {
+  const [row] = await db
+    .update(sceneOneshotSets)
+    .set(patch)
+    .where(and(eq(sceneOneshotSets.sceneId, sceneId), eq(sceneOneshotSets.id, setId)))
+    .returning({ id: sceneOneshotSets.id });
+  return row ? getOneShotSet(sceneId, setId) : null;
+}
+
+export async function deleteOneShotSet(sceneId: string, setId: string): Promise<boolean> {
+  const [row] = await db
+    .delete(sceneOneshotSets)
+    .where(and(eq(sceneOneshotSets.sceneId, sceneId), eq(sceneOneshotSets.id, setId)))
+    .returning({ id: sceneOneshotSets.id });
+  return !!row;
+}
+
+export async function getOneShotSlot(
+  setId: string,
   slotIndex: number
 ): Promise<OneShotSlot | null> {
   const [row] = await db
     .select()
     .from(sceneOneshotSlots)
-    .where(
-      and(eq(sceneOneshotSlots.sceneId, sceneId), eq(sceneOneshotSlots.slotIndex, slotIndex))
-    )
+    .where(and(eq(sceneOneshotSlots.setId, setId), eq(sceneOneshotSlots.slotIndex, slotIndex)))
     .limit(1);
   return row ? toOneShotSlot(row) : null;
 }
 
 export async function updateOneShotSlot(
-  sceneId: string,
+  setId: string,
   slotIndex: number,
   patch: Partial<{
     audioFileId: string | null;
     name: string | null;
     volume: number;
+    loop: boolean;
     color: string | null;
     icon: string | null;
   }>
@@ -258,9 +384,7 @@ export async function updateOneShotSlot(
   const [row] = await db
     .update(sceneOneshotSlots)
     .set(patch)
-    .where(
-      and(eq(sceneOneshotSlots.sceneId, sceneId), eq(sceneOneshotSlots.slotIndex, slotIndex))
-    )
+    .where(and(eq(sceneOneshotSlots.setId, setId), eq(sceneOneshotSlots.slotIndex, slotIndex)))
     .returning();
   return row ? toOneShotSlot(row) : null;
 }

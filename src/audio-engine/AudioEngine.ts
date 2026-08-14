@@ -17,6 +17,8 @@ export type OneShotState = {
   name: string;
   duration: number;
   volume: number;
+  /** When set, a triggered instance repeats until it is stopped. */
+  loop: boolean;
   /** How many overlapping instances of this slot are currently playing. */
   activeCount: number;
 };
@@ -64,6 +66,8 @@ type OneShotSlot = {
   /** Shared by every overlapping instance of this slot, so slot volume affects all of them at once. */
   gainNode: GainNode;
   volume: number;
+  /** Applied to instances as they are triggered, and to those already in flight. */
+  loop: boolean;
   activeSources: Set<AudioBufferSourceNode>;
 };
 
@@ -213,6 +217,7 @@ export class AudioEngine {
         name: slot.name,
         duration: slot.buffer.duration,
         volume: slot.volume,
+        loop: slot.loop,
         activeCount: slot.activeSources.size,
       };
     }
@@ -312,12 +317,12 @@ export class AudioEngine {
     id: string,
     name: string,
     data: ArrayBuffer,
-    initialVolume = 1,
+    options: { volume?: number; loop?: boolean } = {},
   ): Promise<void> {
     const ctx = this.ensureContext();
     const buffer = await ctx.decodeAudioData(data);
     const gainNode = ctx.createGain();
-    const volume = Math.min(1, Math.max(0, initialVolume));
+    const volume = Math.min(1, Math.max(0, options.volume ?? 1));
     gainNode.gain.value = volume;
     // Routed through a shared bus rather than straight to master, so one-shots
     // can be faded as a group independently of the music columns.
@@ -330,6 +335,7 @@ export class AudioEngine {
       buffer,
       gainNode,
       volume,
+      loop: options.loop ?? false,
       activeSources: new Set(),
     });
     this.notify();
@@ -340,12 +346,16 @@ export class AudioEngine {
    * touches instances already in flight — repeated triggers (even of the
    * same slot, even before the previous instance finished) overlap freely
    * and each cleans itself up via onended.
+   *
+   * A looping slot's instance never ends on its own; stopOneShot is what ends
+   * it, which is what the pad's second press does.
    */
   triggerOneShot(id: string): void {
     const slot = this.getOneShotSlot(id);
     const ctx = this.ensureContext();
     const source = ctx.createBufferSource();
     source.buffer = slot.buffer;
+    source.loop = slot.loop;
     source.connect(slot.gainNode);
     slot.activeSources.add(source);
     source.onended = () => {
@@ -375,6 +385,19 @@ export class AudioEngine {
     const clamped = Math.min(1, Math.max(0, volume));
     slot.volume = clamped;
     slot.gainNode.gain.setValueAtTime(clamped, this.ensureContext().currentTime);
+    this.notify();
+  }
+
+  /**
+   * Turns looping on or off for this slot. Applied to instances already
+   * playing as well: turning it off mid-loop lets the sound finish its current
+   * pass and stop by itself, which is gentler than cutting it, and turning it
+   * on catches a sound that is still running.
+   */
+  setOneShotLoop(id: string, loop: boolean): void {
+    const slot = this.getOneShotSlot(id);
+    slot.loop = loop;
+    for (const source of slot.activeSources) source.loop = loop;
     this.notify();
   }
 
