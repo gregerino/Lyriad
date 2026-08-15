@@ -8,7 +8,7 @@ import {
   isAllowedAudioFilename,
   MAX_AUDIO_UPLOAD_BYTES,
 } from "@/lib/audio/limits";
-import type { AudioCategory, AudioFile, Scene } from "@/types/domain";
+import type { AudioCategory, AudioFileWithMeta, Scene } from "@/types/domain";
 import { uploadWithProgress } from "./uploadWithProgress";
 
 type FreeSlot =
@@ -19,9 +19,9 @@ type Status =
   | { step: "idle" }
   | { step: "uploading"; filename: string; progress: number }
   | { step: "registering"; filename: string }
-  | { step: "assign"; audioFile: AudioFile; freeSlots: FreeSlot[] }
-  | { step: "assigning"; audioFile: AudioFile; slot: FreeSlot }
-  | { step: "done"; audioFile: AudioFile; assignedSlot?: FreeSlot }
+  | { step: "assign"; audioFile: AudioFileWithMeta; freeSlots: FreeSlot[] }
+  | { step: "assigning"; audioFile: AudioFileWithMeta; slot: FreeSlot }
+  | { step: "done"; audioFile: AudioFileWithMeta; assignedSlot?: FreeSlot }
   | { step: "error"; message: string };
 
 type AudioUploaderProps = {
@@ -31,8 +31,13 @@ type AudioUploaderProps = {
   oneShotSetId?: string;
   /** When set, locks the category to this value and hides the category selector. */
   category?: AudioCategory | null;
-  onUploaded?: (audioFile: AudioFile) => void;
-  onAssigned?: (info: { slot: FreeSlot; audioFile: AudioFile }) => void;
+  /**
+   * Handed the finished library row, playback URL and all — a caller that means
+   * to use the file straight away (a slot filling itself) can then do so without
+   * waiting to see it come back round from the library.
+   */
+  onUploaded?: (audioFile: AudioFileWithMeta) => void;
+  onAssigned?: (info: { slot: FreeSlot; audioFile: AudioFileWithMeta }) => void;
 };
 
 function slotKey(slot: FreeSlot): string {
@@ -60,7 +65,7 @@ function AssignStep({
   onAssign,
   onSkip,
 }: {
-  audioFile: AudioFile;
+  audioFile: AudioFileWithMeta;
   freeSlots: FreeSlot[];
   /** When the uploader is locked to a category, only that kind is offered up front. */
   category: AudioCategory | null;
@@ -216,7 +221,7 @@ export function AudioUploader({
         const body = await registerRes.json().catch(() => null);
         throw new Error(body?.error ?? "Kunde inte spara filmetadata");
       }
-      const { audioFile }: { audioFile: AudioFile } = await registerRes.json();
+      const { audioFile }: { audioFile: AudioFileWithMeta } = await registerRes.json();
       onUploaded?.(audioFile);
 
       const freeSlots = await computeFreeSlots();
@@ -233,7 +238,7 @@ export function AudioUploader({
     }
   }
 
-  async function handleAssign(audioFile: AudioFile, slot: FreeSlot) {
+  async function handleAssign(audioFile: AudioFileWithMeta, slot: FreeSlot) {
     if (!sceneId) return;
     setStatus({ step: "assigning", audioFile, slot });
     try {

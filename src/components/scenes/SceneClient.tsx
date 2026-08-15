@@ -400,6 +400,20 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-runs only on scene/active set/audioFilesById changes; engine calls are ref-guarded above
   }, [scene, activeSet?.id, audioFilesById]);
 
+  /**
+   * A file uploaded from inside a slot is already registered in the library,
+   * but this page's copy of that library was fetched before it existed — so it
+   * goes in here, the moment the upload finishes. Without it the assignment
+   * that follows lands on an id the desk can't resolve, and the slot reads
+   * "Okänd fil" over a load error until the page is reloaded.
+   */
+  function addUploadedFile(audioFile: AudioFileWithMeta) {
+    // Appended, not prepended: the library lists oldest first.
+    setAudioFiles((prev) =>
+      prev.some((f) => f.id === audioFile.id) ? prev : [...prev, audioFile]
+    );
+  }
+
   function schedulePersist(key: string, fn: () => void, delay = 500) {
     const timers = persistTimers.current;
     if (timers[key]) clearTimeout(timers[key]);
@@ -1125,6 +1139,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                 assigning={musicAssigning[slot.slotIndex] ?? false}
                 assignError={musicSlotErrors[slot.slotIndex] ?? null}
                 onAssign={(audioFileId) => void assignMusicSlot(slot.slotIndex, audioFileId)}
+                onUploaded={addUploadedFile}
                 onClear={() => void clearMusicSlot(slot.slotIndex)}
                 onRetry={() => {
                   if (slot.audioFileId)
@@ -1457,6 +1472,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
                 onAssign={(audioFileId) =>
                   void assignOneShotSlot(slot.setId, slot.slotIndex, audioFileId)
                 }
+                onUploaded={addUploadedFile}
                 onClear={() => void clearOneShotSlot(slot.setId, slot.slotIndex)}
                 onRetry={() => {
                   if (slot.audioFileId)

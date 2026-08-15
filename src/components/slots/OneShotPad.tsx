@@ -26,6 +26,10 @@ type OneShotPadProps = {
   assigning: boolean;
   assignError: string | null;
   onAssign: (audioFileId: string) => void;
+  /** Files uploaded from inside the pad have to reach the library the desk
+      resolves slots against before the assignment does, or the pad is left
+      holding an id nothing on the page can name. */
+  onUploaded: (audioFile: AudioFileWithMeta) => void;
   onClear: () => void;
   onRetry: () => void;
   onTrigger: () => void;
@@ -45,6 +49,7 @@ export function OneShotPad({
   assigning,
   assignError,
   onAssign,
+  onUploaded,
   onClear,
   onRetry,
   onTrigger,
@@ -119,6 +124,7 @@ export function OneShotPad({
                   <AudioUploader
                     category="oneshot"
                     onUploaded={(audioFile) => {
+                      onUploaded(audioFile);
                       onAssign(audioFile.id);
                       close();
                     }}

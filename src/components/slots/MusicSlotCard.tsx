@@ -40,6 +40,10 @@ type MusicSlotCardProps = {
   assigning: boolean;
   assignError: string | null;
   onAssign: (audioFileId: string) => void;
+  /** Files uploaded from inside the card have to reach the library the desk
+      resolves slots against before the assignment does, or the card is left
+      holding an id nothing on the page can name. */
+  onUploaded: (audioFile: AudioFileWithMeta) => void;
   onClear: () => void;
   onRetry: () => void;
   onPlay: () => void;
@@ -69,6 +73,7 @@ export function MusicSlotCard({
   assigning,
   assignError,
   onAssign,
+  onUploaded,
   onClear,
   onRetry,
   onPlay,
@@ -172,8 +177,10 @@ export function MusicSlotCard({
                   <AudioUploader
                     category="music"
                     onUploaded={(audioFile) => {
-                      // Straight into this slot — the uploader's own free-slot
-                      // picker would be a detour when we already know the target.
+                      // Into the library first, then straight into this slot —
+                      // the uploader's own free-slot picker would be a detour
+                      // when we already know the target.
+                      onUploaded(audioFile);
                       onAssign(audioFile.id);
                       close();
                     }}

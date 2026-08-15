@@ -50,13 +50,23 @@ export async function POST(request: Request) {
     );
   }
 
-  const audioFile = await createAudioFile({
+  const file = await createAudioFile({
     filename: parsed.data.filename,
     sizeBytes: parsed.data.sizeBytes,
     r2Key: parsed.data.r2Key,
     mimeType: canonicalMimeType,
     category: parsed.data.category ?? null,
   });
+
+  // Shaped exactly like a row from GET, playback URL included, so a caller can
+  // drop it straight into the list it already holds instead of re-fetching the
+  // whole library to learn one thing it just created. A new file belongs to no
+  // collection yet, which is the only reason that array can be assumed empty.
+  const audioFile: AudioFileWithMeta = {
+    ...file,
+    playbackUrl: await createDownloadUrl(file.r2Key),
+    collectionIds: [],
+  };
 
   return NextResponse.json({ audioFile }, { status: 201 });
 }
