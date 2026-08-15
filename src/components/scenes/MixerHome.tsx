@@ -118,7 +118,8 @@ export function MixerHome() {
           <p className="mt-1 text-sm text-muted-foreground">
             Korta ljud du avfyrar i stunden — en dörr, ett åskslag, ett tärningskast.
             De lägger sig ovanpå varandra och avbryter aldrig musiken. En pad kan
-            loopa, och scenen kan ha flera set att växla mellan.
+            loopa, och padgriden visar ett set i taget — set hör inte till någon
+            scen, så samma bank kan användas i vilken scen som helst.
           </p>
         </div>
       </section>

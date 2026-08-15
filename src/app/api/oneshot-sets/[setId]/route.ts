@@ -1,25 +1,18 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import {
-  countOneShotSets,
-  deleteOneShotSet,
-  getOneShotSet,
-  sceneExists,
-  updateOneShotSet,
-} from "@/lib/db/queries";
+import { deleteOneShotSet, updateOneShotSet } from "@/lib/db/queries";
 
 const updateSetSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
+  /** Null files the set under "Utan grupp"; a group with no sets left stops existing. */
+  groupName: z.string().trim().min(1).max(50).nullable().optional(),
   position: z.number().int().min(0).max(100).optional(),
 });
 
-type RouteParams = { params: Promise<{ id: string; setId: string }> };
+type RouteParams = { params: Promise<{ setId: string }> };
 
 export async function PATCH(request: Request, { params }: RouteParams) {
-  const { id: sceneId, setId } = await params;
-  if (!(await sceneExists(sceneId))) {
-    return NextResponse.json({ error: "Scene not found" }, { status: 404 });
-  }
+  const { setId } = await params;
 
   const body = await request.json().catch(() => null);
   const parsed = updateSetSchema.safeParse(body);
@@ -33,32 +26,22 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
 
-  const set = await updateOneShotSet(sceneId, setId, parsed.data);
+  const set = await updateOneShotSet(setId, parsed.data);
   if (!set) {
     return NextResponse.json({ error: "One-shot set not found" }, { status: 404 });
   }
   return NextResponse.json({ set });
 }
 
+/**
+ * Sets belong to no scene, so there is no last one to protect: deleting them all
+ * leaves the pad grid offering to make the first one, same as a fresh install.
+ */
 export async function DELETE(_request: Request, { params }: RouteParams) {
-  const { id: sceneId, setId } = await params;
-  if (!(await sceneExists(sceneId))) {
-    return NextResponse.json({ error: "Scene not found" }, { status: 404 });
-  }
+  const { setId } = await params;
 
-  if (!(await getOneShotSet(sceneId, setId))) {
+  if (!(await deleteOneShotSet(setId))) {
     return NextResponse.json({ error: "One-shot set not found" }, { status: 404 });
   }
-
-  // A scene without a set has nowhere to put a one-shot at all, and the pad grid
-  // would have no tab to show — so the last one stays.
-  if ((await countOneShotSets(sceneId)) <= 1) {
-    return NextResponse.json(
-      { error: "Scenen måste ha minst ett one-shot-set" },
-      { status: 409 }
-    );
-  }
-
-  await deleteOneShotSet(sceneId, setId);
   return NextResponse.json({ success: true });
 }

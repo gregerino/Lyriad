@@ -8,7 +8,7 @@ import {
   isAllowedAudioFilename,
   MAX_AUDIO_UPLOAD_BYTES,
 } from "@/lib/audio/limits";
-import type { AudioCategory, AudioFileWithMeta, Scene } from "@/types/domain";
+import type { AudioCategory, AudioFileWithMeta, OneShotSet, Scene } from "@/types/domain";
 import { uploadWithProgress } from "./uploadWithProgress";
 
 type FreeSlot =
@@ -87,7 +87,7 @@ function AssignStep({
     <div className="flex flex-col gap-3">
       <p className="text-sm text-parchment-300">
         <span className="font-medium text-parchment-100">{audioFile.filename}</span> laddades upp.
-        Tilldela en ledig plats i scenen?
+        Tilldela en ledig plats?
       </p>
 
       <div className="flex flex-wrap gap-2">
@@ -149,15 +149,22 @@ export function AudioUploader({
 
   async function computeFreeSlots(): Promise<FreeSlot[]> {
     if (!sceneId) return [];
-    const res = await fetch(`/api/scenes/${sceneId}`);
-    if (!res.ok) return [];
-    const { scene }: { scene: Scene } = await res.json();
+    // Music slots belong to the scene, one-shot sets to nobody — so the two
+    // halves of "where can this go" come from two places.
+    const [sceneRes, setsRes] = await Promise.all([
+      fetch(`/api/scenes/${sceneId}`),
+      fetch("/api/oneshot-sets"),
+    ]);
+    if (!sceneRes.ok) return [];
+    const { scene }: { scene: Scene } = await sceneRes.json();
     const music = scene.musicSlots
       .filter((s) => s.audioFileId === null)
       .map((s): FreeSlot => ({ kind: "music", slotIndex: s.slotIndex }));
+    if (!setsRes.ok) return music;
+    const { sets: allSets }: { sets: OneShotSet[] } = await setsRes.json();
     // The set on screen comes first, so "första lediga one-shot" lands where the
     // user is looking rather than in whichever set happens to sort first.
-    const sets = [...scene.oneShotSets].sort((a, b) =>
+    const sets = [...allSets].sort((a, b) =>
       a.id === oneShotSetId ? -1 : b.id === oneShotSetId ? 1 : 0
     );
     const oneshot = sets.flatMap((set) =>
@@ -245,7 +252,7 @@ export function AudioUploader({
       const path =
         slot.kind === "music"
           ? `/api/scenes/${sceneId}/music-slots/${slot.slotIndex}`
-          : `/api/scenes/${sceneId}/oneshot-sets/${slot.setId}/slots/${slot.slotIndex}`;
+          : `/api/oneshot-sets/${slot.setId}/slots/${slot.slotIndex}`;
       const res = await fetch(path, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

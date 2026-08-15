@@ -98,16 +98,16 @@ CREATE TABLE scene_music_slots (
   PRIMARY KEY (scene_id, slot_index)
 );
 
-CREATE TABLE scene_oneshot_sets (
+CREATE TABLE oneshot_sets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  scene_id UUID NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
+  group_name TEXT,
   position SMALLINT NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE scene_oneshot_slots (
-  set_id UUID NOT NULL REFERENCES scene_oneshot_sets(id) ON DELETE CASCADE,
+CREATE TABLE oneshot_slots (
+  set_id UUID NOT NULL REFERENCES oneshot_sets(id) ON DELETE CASCADE,
   slot_index SMALLINT NOT NULL CHECK (slot_index BETWEEN 1 AND 20),
   audio_file_id UUID REFERENCES audio_files(id) ON DELETE SET NULL,
   volume REAL NOT NULL DEFAULT 0.8 CHECK (volume BETWEEN 0 AND 1),
@@ -124,16 +124,40 @@ CREATE TABLE scene_oneshot_slots (
 via `CHECK`, så fler rader per scen/set än så kan aldrig existera. Ingen
 trigger behövs.
 
-**One-shot-set:** en scen kan ha flera banker av one-shots ("Strid",
-"Krogen", "Resan") och paddgriden visar en i taget. Setet är en egen tabell
-snarare än ett index i slot-nyckeln, eftersom det har ett namn och en
-ordning som användaren redigerar. En scen har alltid minst ett set —
-API:et vägrar radera det sista.
+**One-shot-set:** en bank av one-shots ("Strid", "Krogen", "Resan") som
+paddgriden visar en i taget. Set hör **inte** till någon scen: en bank med
+stridsljud är lika användbar i grottan som på gatan, så ett set väljs till
+scenen man spelar precis som scenen själv väljs i flikraden. Setet är en
+egen tabell snarare än ett index i slot-nyckeln, eftersom det har ett namn
+och en ordning som användaren redigerar.
 
-När en scen skapas skapas samtidigt alla 10 musikrader, ett förvalt set och
-dess 20 slot-rader (med `audio_file_id = NULL`) i samma transaktion. Det gör
-att frontend alltid kan förvänta sig fasta arrayer av längd 10/20, utan att
-särskilja "tom plats" från "plats finns inte".
+**Grupper:** `group_name` är ett fritt gruppnamn ("Strid", "Miljö",
+"Röster"), på samma sätt som en samling har `category` — en kolumn och inte
+en tabell, eftersom väljaren bara behöver namnet och en grupp slutar
+existera när dess sista set lämnar den. `NULL` betyder "Utan grupp".
+Väljaren till vänster om set-flikarna smalnar av raden till en grupp i
+taget, precis som kampanjväljaren gör med scenflikarna, och visas först när
+minst ett set faktiskt ligger i en grupp.
+
+Att byta grupp byter också bank: ligger setet som visas inte i gruppen man
+öppnar tar dess första set över padgriden. Ett nytt set som skapas medan en
+grupp visas hamnar i den gruppen.
+
+Vilket set en scen senast visade är klient-state (`localStorage`,
+`lyriad:oneshot-set:<sceneId>`), inte databas-state — det är en egenskap
+hos hur scenen spelas, inte hos setet. Faller tillbaka på det första setet
+(helst ett ur gruppen man bläddrar i) när det ihågkomna är raderat. Vald
+grupp ligger i `lyriad:oneshot-group` och är inte per scen: den följer i
+stället med det set som visas, så en scen som lämnades i "Strid" öppnar
+väljaren där igen.
+
+När en scen skapas skapas samtidigt alla 10 musikrader (med
+`audio_file_id = NULL`), men inget set — scener delar på de set som redan
+finns. Ett nytt set skapas med sina 20 slot-rader i samma transaktion. Det
+gör att frontend alltid kan förvänta sig fasta arrayer av längd 10/20, utan
+att särskilja "tom plats" från "plats finns inte". Finns inga set alls
+(nytt system, eller alla raderade) visar paddgriden en uppmaning att skapa
+det första.
 
 **Kampanjer:** en scen hör till högst en kampanj ("Curse of Strahd",
 "Phandelver and Below"), och kampanjen är enbart en gruppering — flikraden
@@ -260,18 +284,18 @@ PATCH  /api/campaigns/:id              Byt namn/ordning
 DELETE /api/campaigns/:id              Radera kampanj (scenerna behålls)
 
 GET    /api/scenes                     Lista scener
-POST   /api/scenes                     Skapa scen (+ alla 30 slot-rader)
-GET    /api/scenes/:id                 Hämta scen + slots
+POST   /api/scenes                     Skapa scen (+ alla 10 musikrader)
+GET    /api/scenes/:id                 Hämta scen + musikslots
 PATCH  /api/scenes/:id                 Uppdatera namn/beskrivning/favorit/kampanj
 DELETE /api/scenes/:id                 Radera scen (cascade slots)
 
 PATCH  /api/scenes/:id/music-slots/:slotIndex     Uppdatera slot (audio_file_id, volym, loop, fade)
 
-POST   /api/scenes/:id/oneshot-sets               Skapa set (+ dess 20 slot-rader)
-PATCH  /api/scenes/:id/oneshot-sets/:setId        Byt namn/ordning på setet
-DELETE /api/scenes/:id/oneshot-sets/:setId        Radera set (409 om det är det sista)
-PATCH  /api/scenes/:id/oneshot-sets/:setId/slots/:slotIndex
-                                                  Uppdatera slot (audio_file_id, volym, loop, färg/ikon)
+GET    /api/oneshot-sets                          Lista alla set + deras slots
+POST   /api/oneshot-sets                          Skapa set (+ dess 20 slot-rader), ev. i en grupp
+PATCH  /api/oneshot-sets/:setId                   Byt namn/grupp/ordning på setet
+DELETE /api/oneshot-sets/:setId                   Radera set (även det sista)
+PATCH  /api/oneshot-sets/:setId/slots/:slotIndex  Uppdatera slot (audio_file_id, volym, loop, färg/ikon)
 
 GET    /api/audio-files                Lista uppladdade filer
 POST   /api/audio-files/upload-url     Begär presignerad uppladdnings-URL (R2 eller lokal)

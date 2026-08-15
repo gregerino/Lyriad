@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ONESHOT_GROUP_ID, useAudioEngine } from "@/audio-engine";
 import { AudioUploader } from "@/components/audio/AudioUploader";
 import { MixerMenu } from "@/components/scenes/MixerMenu";
-import { OneShotSetTabs } from "@/components/scenes/OneShotSetTabs";
+import { groupKeyOf, OneShotSetTabs, UNGROUPED } from "@/components/scenes/OneShotSetTabs";
 import { SceneArtwork } from "@/components/scenes/SceneArtwork";
 import { SceneTabs } from "@/components/scenes/SceneTabs";
 import { MusicSlotCard } from "@/components/slots/MusicSlotCard";
@@ -63,6 +63,12 @@ const FADE_SETTING_KEY = "lyriad:fade-duration-ms";
 const EMPTY_PADS_SETTING_KEY = "lyriad:show-empty-oneshots";
 /** Which one-shot set this scene was left on, per browser. */
 const ACTIVE_SET_KEY = (sceneId: string) => `lyriad:oneshot-set:${sceneId}`;
+/**
+ * Which group the set tabs are narrowed to. Not per scene, unlike the set
+ * itself: the group is how the shelf is being browsed, and it follows whichever
+ * set is showing anyway.
+ */
+const ACTIVE_GROUP_KEY = "lyriad:oneshot-group";
 
 /** How far down the page the mixer has to go before the compact transport takes over. */
 const APP_HEADER_HEIGHT_PX = 56;
@@ -74,20 +80,21 @@ function replaceMusicSlot(scene: Scene, slot: MusicSlot): Scene {
   };
 }
 
-function replaceOneShotSlot(scene: Scene, slot: OneShotSlot): Scene {
-  return {
-    ...scene,
-    oneShotSets: scene.oneShotSets.map((set) =>
-      set.id === slot.setId
-        ? { ...set, slots: set.slots.map((s) => (s.slotIndex === slot.slotIndex ? slot : s)) }
-        : set
-    ),
-  };
+function replaceOneShotSlot(sets: OneShotSet[], slot: OneShotSlot): OneShotSet[] {
+  return sets.map((set) =>
+    set.id === slot.setId
+      ? { ...set, slots: set.slots.map((s) => (s.slotIndex === slot.slotIndex ? slot : s)) }
+      : set
+  );
 }
 
-/** The stored slot as the scene currently has it — the value an optimistic edit reverts to. */
-function findOneShotSlot(scene: Scene, setId: string, slotIndex: number): OneShotSlot | undefined {
-  return scene.oneShotSets
+/** The stored slot as the set currently has it — the value an optimistic edit reverts to. */
+function findOneShotSlot(
+  sets: OneShotSet[],
+  setId: string,
+  slotIndex: number
+): OneShotSlot | undefined {
+  return sets
     .find((set) => set.id === setId)
     ?.slots.find((slot) => slot.slotIndex === slotIndex);
 }
@@ -100,6 +107,8 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   const { notify, notice, dismiss } = useNotice();
 
   const [scene, setScene] = useState<Scene | null>(null);
+  /** Every set there is — they belong to no scene, so this desk can show any of them. */
+  const [oneShotSets, setOneShotSets] = useState<OneShotSet[]>([]);
   const [audioFiles, setAudioFiles] = useState<AudioFileWithMeta[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -129,13 +138,16 @@ export function SceneClient({ sceneId }: SceneClientProps) {
    */
   const [showEmptyPads, setShowEmptyPads] = useStoredSetting(EMPTY_PADS_SETTING_KEY, false);
   /**
-   * The set the pad grid is showing. Remembered per scene: a table that ended
-   * last week in "Strid" opens there again rather than back on the first set.
+   * The set the pad grid is showing. Remembered per scene even though sets are
+   * shared: which bank of pads a scene wants is a property of the scene as
+   * played, so a table that ended last week in "Strid" opens there again.
    */
   const [storedSetId, setStoredSetId] = useStoredSetting<string | null>(
     ACTIVE_SET_KEY(sceneId),
     null
   );
+  /** The group the tabs are narrowed to; null shows every set at once. */
+  const [groupFilter, setGroupFilter] = useStoredSetting<string | null>(ACTIVE_GROUP_KEY, null);
 
   /** True once the desk's own transport has scrolled out from under the header. */
   const [transportOffscreen, setTransportOffscreen] = useState(false);
@@ -180,9 +192,16 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     removeOneShotSlot,
   } = useAudioEngine();
 
-  /** Falls back to the first set whenever the remembered one is gone. */
+  /**
+   * Falls back to the first set whenever the remembered one is gone — preferring
+   * one from the group being browsed, so a scene with no memory of its own opens
+   * in the group the switcher is on rather than dragging it elsewhere.
+   */
   const activeSet =
-    scene?.oneShotSets.find((set) => set.id === storedSetId) ?? scene?.oneShotSets[0] ?? null;
+    oneShotSets.find((set) => set.id === storedSetId) ??
+    oneShotSets.find((set) => groupFilter === null || groupKeyOf(set) === groupFilter) ??
+    oneShotSets[0] ??
+    null;
 
   const audioFilesById = useMemo(
     () => new Map(audioFiles.map((f) => [f.id, f])),
@@ -200,22 +219,26 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   async function fetchAll() {
     setLoadError(null);
     try {
-      const [sceneRes, filesRes, presetsRes, collectionsRes, campaignsRes] = await Promise.all([
-        fetch(`/api/scenes/${sceneId}`),
-        fetch("/api/audio-files"),
-        fetch(`/api/scenes/${sceneId}/mix-presets`),
-        fetch("/api/collections"),
-        fetch("/api/campaigns"),
-      ]);
+      const [sceneRes, filesRes, setsRes, presetsRes, collectionsRes, campaignsRes] =
+        await Promise.all([
+          fetch(`/api/scenes/${sceneId}`),
+          fetch("/api/audio-files"),
+          fetch("/api/oneshot-sets"),
+          fetch(`/api/scenes/${sceneId}/mix-presets`),
+          fetch("/api/collections"),
+          fetch("/api/campaigns"),
+        ]);
       if (sceneRes.status === 404) {
         setNotFound(true);
         return;
       }
-      if (!sceneRes.ok || !filesRes.ok) throw new Error("Kunde inte ladda scenen");
+      if (!sceneRes.ok || !filesRes.ok || !setsRes.ok) throw new Error("Kunde inte ladda scenen");
       const { scene: sceneData } = await sceneRes.json();
       const { audioFiles: files } = await filesRes.json();
+      const { sets } = await setsRes.json();
       setScene(sceneData);
       setAudioFiles(files);
+      setOneShotSets(sets);
       // Only used to filter the slot pickers, so a failure here costs the
       // picker its collection filter rather than the whole scene.
       if (collectionsRes.ok) {
@@ -282,6 +305,18 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     // The anchors only exist once the scene has rendered, so this has to re-run
     // when it arrives — and again if the user navigates to a different one.
   }, [scene?.id]);
+
+  /**
+   * Keeps the group switcher on the group the showing set actually belongs to.
+   * The set is remembered per scene and the group is not, so opening a scene
+   * that ended in another group would otherwise show a row of tabs with no
+   * active one in it.
+   */
+  useEffect(() => {
+    if (!activeSet || groupFilter === null) return;
+    const key = groupKeyOf(activeSet);
+    if (key !== groupFilter) setGroupFilter(key);
+  }, [activeSet, groupFilter, setGroupFilter]);
 
   // Remembers the most recently opened scene so "/" can land back on its mixer view.
   useEffect(() => {
@@ -392,11 +427,11 @@ export function SceneClient({ sceneId }: SceneClientProps) {
       }
     }
 
-    // Anything held for a pad the scene no longer has — a deleted set, or a slot
+    // Anything held for a pad that no longer exists — a deleted set, or a slot
     // reassigned in a set that isn't showing — goes, playing or not. It decodes
     // again from its own set's pass above the next time that set is opened.
     const livePads = new Set(
-      scene.oneShotSets.flatMap((set) =>
+      oneShotSets.flatMap((set) =>
         set.slots
           .filter((slot) => slot.audioFileId)
           .map((slot) => `${oneshotTrackId(set.id, slot.slotIndex)}:${slot.audioFileId}`)
@@ -407,8 +442,8 @@ export function SceneClient({ sceneId }: SceneClientProps) {
       delete loadedOneshotRef.current[trackId];
       removeOneShotSlot(trackId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-runs only on scene/active set/audioFilesById changes; engine calls are ref-guarded above
-  }, [scene, activeSet?.id, audioFilesById]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-runs only on scene/set/audioFilesById changes; engine calls are ref-guarded above
+  }, [scene, oneShotSets, activeSet?.id, audioFilesById]);
 
   /**
    * A file uploaded from inside a slot is already registered in the library,
@@ -465,7 +500,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     body: Record<string, unknown>
   ): Promise<{ ok: boolean; status: number; error?: string }> {
     try {
-      const res = await fetch(`/api/scenes/${sceneId}/oneshot-sets/${setId}/slots/${slotIndex}`, {
+      const res = await fetch(`/api/oneshot-sets/${setId}/slots/${slotIndex}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -475,7 +510,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
         return { ok: false, status: res.status, error: errBody?.error };
       }
       const { slot } = await res.json();
-      setScene((prev) => (prev ? replaceOneShotSlot(prev, slot) : prev));
+      setOneShotSets((prev) => replaceOneShotSlot(prev, slot));
       return { ok: true, status: res.status };
     } catch {
       return { ok: false, status: 0, error: "Nätverksfel" };
@@ -576,7 +611,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
 
   async function clearOneShotSlot(setId: string, slotIndex: number) {
     const trackId = oneshotTrackId(setId, slotIndex);
-    const previous = scene ? findOneShotSlot(scene, setId, slotIndex) : undefined;
+    const previous = findOneShotSlot(oneShotSets, setId, slotIndex);
     setOneshotAssigning((prev) => ({ ...prev, [trackId]: true }));
     const result = await patchOneShotSlot(setId, slotIndex, { audioFileId: null, name: null });
     if (result.ok) {
@@ -749,20 +784,20 @@ export function SceneClient({ sceneId }: SceneClientProps) {
 
   function handleOneShotVolume(setId: string, slotIndex: number, volume: number) {
     const trackId = oneshotTrackId(setId, slotIndex);
-    const previous = scene ? findOneShotSlot(scene, setId, slotIndex)?.volume : undefined;
+    const previous = findOneShotSlot(oneShotSets, setId, slotIndex)?.volume;
     if (oneShots[trackId]) setOneShotVolume(trackId, volume);
-    setScene((prev) => {
-      const slot = prev ? findOneShotSlot(prev, setId, slotIndex) : undefined;
-      return prev && slot ? replaceOneShotSlot(prev, { ...slot, volume }) : prev;
+    setOneShotSets((prev) => {
+      const slot = findOneShotSlot(prev, setId, slotIndex);
+      return slot ? replaceOneShotSlot(prev, { ...slot, volume }) : prev;
     });
     schedulePersist(`oneshot-volume-${trackId}`, () =>
       persist(
         () => patchOneShotSlot(setId, slotIndex, { volume }),
         () => {
           if (previous === undefined) return;
-          setScene((prev) => {
-            const slot = prev ? findOneShotSlot(prev, setId, slotIndex) : undefined;
-            return prev && slot ? replaceOneShotSlot(prev, { ...slot, volume: previous }) : prev;
+          setOneShotSets((prev) => {
+            const slot = findOneShotSlot(prev, setId, slotIndex);
+            return slot ? replaceOneShotSlot(prev, { ...slot, volume: previous }) : prev;
           });
         },
         `Volymen för one-shot ${slotIndex} kunde inte sparas.`
@@ -778,17 +813,17 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   function handleOneShotLoop(setId: string, slotIndex: number, loop: boolean) {
     const trackId = oneshotTrackId(setId, slotIndex);
     if (oneShots[trackId]) setOneShotLoop(trackId, loop);
-    setScene((prev) => {
-      const slot = prev ? findOneShotSlot(prev, setId, slotIndex) : undefined;
-      return prev && slot ? replaceOneShotSlot(prev, { ...slot, loop }) : prev;
+    setOneShotSets((prev) => {
+      const slot = findOneShotSlot(prev, setId, slotIndex);
+      return slot ? replaceOneShotSlot(prev, { ...slot, loop }) : prev;
     });
     persist(
       () => patchOneShotSlot(setId, slotIndex, { loop }),
       () => {
         if (oneShots[trackId]) setOneShotLoop(trackId, !loop);
-        setScene((prev) => {
-          const slot = prev ? findOneShotSlot(prev, setId, slotIndex) : undefined;
-          return prev && slot ? replaceOneShotSlot(prev, { ...slot, loop: !loop }) : prev;
+        setOneShotSets((prev) => {
+          const slot = findOneShotSlot(prev, setId, slotIndex);
+          return slot ? replaceOneShotSlot(prev, { ...slot, loop: !loop }) : prev;
         });
       },
       `Loopinställningen för one-shot ${slotIndex} kunde inte sparas.`
@@ -840,7 +875,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     }
     // Every set, not just the one on screen: a looping pad left running in
     // another set is exactly what "Återställ ljud" is for.
-    for (const set of scene.oneShotSets) {
+    for (const set of oneShotSets) {
       for (const slot of set.slots) {
         const trackId = oneshotTrackId(set.id, slot.slotIndex);
         if (oneShots[trackId]) stopOneShot(trackId);
@@ -857,7 +892,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
         handleMusicVolume(slot.slotIndex, DEFAULT_SLOT_VOLUME);
       }
     }
-    for (const set of scene.oneShotSets) {
+    for (const set of oneShotSets) {
       for (const slot of set.slots) {
         if (slot.volume !== DEFAULT_SLOT_VOLUME) {
           handleOneShotVolume(set.id, slot.slotIndex, DEFAULT_SLOT_VOLUME);
@@ -880,30 +915,46 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   }
 
   function handleOneShotName(setId: string, slotIndex: number, name: string | null) {
-    const previous = scene ? (findOneShotSlot(scene, setId, slotIndex)?.name ?? null) : null;
-    setScene((prev) => {
-      const slot = prev ? findOneShotSlot(prev, setId, slotIndex) : undefined;
-      return prev && slot ? replaceOneShotSlot(prev, { ...slot, name }) : prev;
+    const previous = findOneShotSlot(oneShotSets, setId, slotIndex)?.name ?? null;
+    setOneShotSets((prev) => {
+      const slot = findOneShotSlot(prev, setId, slotIndex);
+      return slot ? replaceOneShotSlot(prev, { ...slot, name }) : prev;
     });
     persist(
       () => patchOneShotSlot(setId, slotIndex, { name }),
       () =>
-        setScene((prev) => {
-          const slot = prev ? findOneShotSlot(prev, setId, slotIndex) : undefined;
-          return prev && slot ? replaceOneShotSlot(prev, { ...slot, name: previous }) : prev;
+        setOneShotSets((prev) => {
+          const slot = findOneShotSlot(prev, setId, slotIndex);
+          return slot ? replaceOneShotSlot(prev, { ...slot, name: previous }) : prev;
         }),
       "Namnet kunde inte sparas."
     );
   }
 
+  /**
+   * Switching group switches the bank: the tabs narrow, and unless the set
+   * already showing lives in the group being opened, the first of its sets
+   * takes over the grid. "Alla grupper" only widens the row and leaves the
+   * showing set alone.
+   */
+  function selectGroup(groupKey: string | null) {
+    setGroupFilter(groupKey);
+    if (groupKey === null) return;
+    if (activeSet && groupKeyOf(activeSet) === groupKey) return;
+    const firstInGroup = oneShotSets.find((set) => groupKeyOf(set) === groupKey);
+    if (firstInGroup) setStoredSetId(firstInGroup.id);
+  }
+
   async function createOneShotSet() {
-    if (!scene) return;
     setCreatingSet(true);
     try {
-      const res = await fetch(`/api/scenes/${sceneId}/oneshot-sets`, {
+      // A set made while a group is showing joins it — that is where the user
+      // is looking, and an ungrouped set would land outside the current tabs.
+      const groupName = groupFilter && groupFilter !== UNGROUPED ? groupFilter : null;
+      const res = await fetch("/api/oneshot-sets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: `Set ${scene.oneShotSets.length + 1}` }),
+        body: JSON.stringify({ name: `Set ${oneShotSets.length + 1}`, groupName }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
@@ -911,7 +962,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
         return;
       }
       const { set }: { set: OneShotSet } = await res.json();
-      setScene((prev) => (prev ? { ...prev, oneShotSets: [...prev.oneShotSets, set] } : prev));
+      setOneShotSets((prev) => [...prev, set]);
       // A new, empty set is only worth making if you land in it.
       setStoredSetId(set.id);
     } catch {
@@ -922,23 +973,14 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   }
 
   function renameOneShotSet(setId: string, name: string) {
-    const previous = scene?.oneShotSets.find((s) => s.id === setId)?.name;
+    const previous = oneShotSets.find((s) => s.id === setId)?.name;
     if (previous === undefined || name === previous) return;
     const apply = (value: string) =>
-      setScene((prev) =>
-        prev
-          ? {
-              ...prev,
-              oneShotSets: prev.oneShotSets.map((s) =>
-                s.id === setId ? { ...s, name: value } : s
-              ),
-            }
-          : prev
-      );
+      setOneShotSets((prev) => prev.map((s) => (s.id === setId ? { ...s, name: value } : s)));
     apply(name);
     persist(
       async () => {
-        const res = await fetch(`/api/scenes/${sceneId}/oneshot-sets/${setId}`, {
+        const res = await fetch(`/api/oneshot-sets/${setId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name }),
@@ -950,34 +992,55 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     );
   }
 
+  /** Files the set under a group — or, with null, back under "Utan grupp". */
+  function setOneShotSetGroup(setId: string, groupName: string | null) {
+    const previous = oneShotSets.find((s) => s.id === setId)?.groupName;
+    if (previous === undefined || groupName === previous) return;
+    const apply = (value: string | null) =>
+      setOneShotSets((prev) => prev.map((s) => (s.id === setId ? { ...s, groupName: value } : s)));
+    apply(groupName);
+    // The switcher follows the set that just moved, so the grid it is showing
+    // stays in the tab row rather than being filtered out from under itself.
+    if (groupFilter !== null && setId === activeSet?.id) {
+      setGroupFilter(groupName ?? UNGROUPED);
+    }
+    persist(
+      async () => {
+        const res = await fetch(`/api/oneshot-sets/${setId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ groupName }),
+        }).catch(() => null);
+        return { ok: res?.ok ?? false };
+      },
+      () => apply(previous),
+      "Gruppen kunde inte sparas."
+    );
+  }
+
   /**
-   * Deleting a set throws away up to twenty assignments at once, so unlike a
-   * single pad this one asks first — there is no undo that could put the whole
-   * bank back.
+   * Deleting a set throws away up to twenty assignments at once — and the set is
+   * shared, so it goes from every scene that used it. Hence the confirm: unlike
+   * a single pad there is no undo that could put the whole bank back.
    */
   async function deleteOneShotSet(setId: string) {
-    if (!scene) return;
-    const set = scene.oneShotSets.find((s) => s.id === setId);
+    const set = oneShotSets.find((s) => s.id === setId);
     if (!set) return;
     const filled = set.slots.filter((slot) => slot.audioFileId).length;
     const confirmed = window.confirm(
       filled > 0
-        ? `Radera "${set.name}" med ${filled} ljud?`
+        ? `Radera "${set.name}" med ${filled} ljud? Setet försvinner från alla scener.`
         : `Radera "${set.name}"?`
     );
     if (!confirmed) return;
 
-    const res = await fetch(`/api/scenes/${sceneId}/oneshot-sets/${setId}`, {
-      method: "DELETE",
-    }).catch(() => null);
+    const res = await fetch(`/api/oneshot-sets/${setId}`, { method: "DELETE" }).catch(() => null);
     if (!res?.ok) {
       const body = await res?.json().catch(() => null);
       notify(body?.error ?? "Kunde inte radera setet", { tone: "danger" });
       return;
     }
-    setScene((prev) =>
-      prev ? { ...prev, oneShotSets: prev.oneShotSets.filter((s) => s.id !== setId) } : prev
-    );
+    setOneShotSets((prev) => prev.filter((s) => s.id !== setId));
     if (storedSetId === setId) setStoredSetId(null);
   }
 
@@ -1475,18 +1538,26 @@ export function SceneClient({ sceneId }: SceneClientProps) {
           </div>
         </div>
 
-        {activeSet && (
-          <div className="mt-4 flex items-center gap-2">
-            <OneShotSetTabs
-              sets={scene.oneShotSets}
-              activeSetId={activeSet.id}
-              onSelect={setStoredSetId}
-              onCreate={() => void createOneShotSet()}
-              onRename={renameOneShotSet}
-              onDelete={(setId) => void deleteOneShotSet(setId)}
-              creating={creatingSet}
-            />
-          </div>
+        <div className="mt-4 flex items-center gap-2">
+          <OneShotSetTabs
+            sets={oneShotSets}
+            activeSetId={activeSet?.id ?? null}
+            groupFilter={groupFilter}
+            onSelectGroup={selectGroup}
+            onSelect={setStoredSetId}
+            onCreate={() => void createOneShotSet()}
+            onRename={renameOneShotSet}
+            onGroupChange={setOneShotSetGroup}
+            onDelete={(setId) => void deleteOneShotSet(setId)}
+            creating={creatingSet}
+          />
+        </div>
+
+        {!activeSet && (
+          <p className="mt-4 rounded-lg border border-dashed border-border-strong px-4 py-6 text-center text-sm text-muted-foreground">
+            Inga one-shot-set än. Ett set är en bank med pads som vilken scen som
+            helst kan visa — skapa det första med <span className="text-parchment-200">+</span>.
+          </p>
         )}
 
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-10">

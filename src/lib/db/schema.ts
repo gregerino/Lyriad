@@ -111,28 +111,34 @@ export const sceneMusicSlots = pgTable(
 );
 
 /**
- * A bank of one-shot pads within a scene — "Strid", "Krogen", "Resan". A scene
- * always has at least one; the pad grid shows exactly one at a time.
+ * A bank of one-shot pads — "Strid", "Krogen", "Resan". Sets belong to no
+ * particular scene: a bank of combat sounds is worth as much in the dungeon as
+ * in the street, so the pad grid picks one of these the way the tab bar picks a
+ * scene. Which set a scene was left on is remembered per browser, not stored.
  */
-export const sceneOneshotSets = pgTable("scene_oneshot_sets", {
+export const oneshotSets = pgTable("oneshot_sets", {
   id: uuid("id").primaryKey().defaultRandom(),
-  sceneId: uuid("scene_id")
-    .notNull()
-    .references(() => scenes.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
-  /** Tab order within the scene; ties fall back to created_at. */
+  /**
+   * Free-form group the set is filed under ("Strid", "Miljö", "Röster"), the
+   * way a collection has a category. Null means it shows under "Utan grupp".
+   * A plain column rather than a table: the switcher needs the name and nothing
+   * else, and a group stops existing when its last set leaves it.
+   */
+  groupName: text("group_name"),
+  /** Tab order in the set switcher; ties fall back to created_at. */
   position: smallint("position").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
 });
 
-export const sceneOneshotSlots = pgTable(
-  "scene_oneshot_slots",
+export const oneshotSlots = pgTable(
+  "oneshot_slots",
   {
     setId: uuid("set_id")
       .notNull()
-      .references(() => sceneOneshotSets.id, { onDelete: "cascade" }),
+      .references(() => oneshotSets.id, { onDelete: "cascade" }),
     slotIndex: smallint("slot_index").notNull(),
     audioFileId: uuid("audio_file_id").references(() => audioFiles.id, {
       onDelete: "set null",
@@ -146,8 +152,8 @@ export const sceneOneshotSlots = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.setId, table.slotIndex] }),
-    check("scene_oneshot_slots_slot_index_check", sql`${table.slotIndex} BETWEEN 1 AND 20`),
-    check("scene_oneshot_slots_volume_check", sql`${table.volume} BETWEEN 0 AND 1`),
+    check("oneshot_slots_slot_index_check", sql`${table.slotIndex} BETWEEN 1 AND 20`),
+    check("oneshot_slots_volume_check", sql`${table.volume} BETWEEN 0 AND 1`),
   ]
 );
 

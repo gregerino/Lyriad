@@ -19,11 +19,15 @@ export type OneShotSlot = {
   icon: string | null;
 };
 
-/** One bank of one-shot pads. A scene always has at least one. */
+/**
+ * One bank of one-shot pads, belonging to no particular scene — any scene can
+ * show any set, the way any scene can be picked from the tab bar.
+ */
 export type OneShotSet = {
   id: string;
-  sceneId: string;
   name: string;
+  /** Free-form group the set is filed under; null means "Utan grupp". */
+  groupName: string | null;
   position: number;
   slots: OneShotSlot[];
 };
@@ -78,7 +82,6 @@ export type Scene = {
   /** Null means the scene belongs to no campaign. */
   campaignId: string | null;
   musicSlots: MusicSlot[];
-  oneShotSets: OneShotSet[];
   createdAt: string;
   updatedAt: string;
 };

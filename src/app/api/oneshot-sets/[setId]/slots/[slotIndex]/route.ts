@@ -1,12 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import {
-  getAudioFile,
-  getOneShotSet,
-  getOneShotSlot,
-  sceneExists,
-  updateOneShotSlot,
-} from "@/lib/db/queries";
+import { getAudioFile, getOneShotSlot, updateOneShotSlot } from "@/lib/db/queries";
 
 const MIN_SLOT = 1;
 const MAX_SLOT = 20;
@@ -20,7 +14,7 @@ const patchSchema = z.object({
   icon: z.string().trim().max(50).nullable().optional(),
 });
 
-type RouteParams = { params: Promise<{ id: string; setId: string; slotIndex: string }> };
+type RouteParams = { params: Promise<{ setId: string; slotIndex: string }> };
 
 function parseSlotIndex(raw: string): number | null {
   if (!/^\d+$/.test(raw)) return null;
@@ -30,17 +24,7 @@ function parseSlotIndex(raw: string): number | null {
 }
 
 export async function PATCH(request: Request, { params }: RouteParams) {
-  const { id: sceneId, setId, slotIndex: rawSlotIndex } = await params;
-
-  if (!(await sceneExists(sceneId))) {
-    return NextResponse.json({ error: "Scene not found" }, { status: 404 });
-  }
-
-  // Resolved through the scene, so a set id belonging to another scene is a 404
-  // rather than an edit of somebody else's pad.
-  if (!(await getOneShotSet(sceneId, setId))) {
-    return NextResponse.json({ error: "One-shot set not found" }, { status: 404 });
-  }
+  const { setId, slotIndex: rawSlotIndex } = await params;
 
   const slotIndex = parseSlotIndex(rawSlotIndex);
   if (slotIndex === null) {
@@ -63,6 +47,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
 
+  // The slot row is proof enough that the set exists: it only exists because the
+  // set does, and the foreign key takes it away with the set.
   const current = await getOneShotSlot(setId, slotIndex);
   if (!current) {
     return NextResponse.json({ error: "Slot not found" }, { status: 404 });
