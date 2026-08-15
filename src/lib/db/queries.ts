@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   audioFileCollections,
@@ -477,6 +477,34 @@ export async function listAudioFileCollectionIds(): Promise<Map<string, string[]
     else map.set(row.audioFileId, [row.collectionId]);
   }
   return map;
+}
+
+/**
+ * How many mixer slots point at each audio file — music rows and one-shot pads
+ * counted together, since a file is equally gone from both. Deleting a file
+ * empties those slots (`ON DELETE SET NULL`) rather than being refused, so the
+ * library asks for confirmation with the number in hand.
+ */
+export async function listAudioFileSlotUsage(): Promise<Map<string, number>> {
+  const [musicRows, oneshotRows] = await Promise.all([
+    db
+      .select({ audioFileId: sceneMusicSlots.audioFileId, uses: count() })
+      .from(sceneMusicSlots)
+      .where(isNotNull(sceneMusicSlots.audioFileId))
+      .groupBy(sceneMusicSlots.audioFileId),
+    db
+      .select({ audioFileId: oneshotSlots.audioFileId, uses: count() })
+      .from(oneshotSlots)
+      .where(isNotNull(oneshotSlots.audioFileId))
+      .groupBy(oneshotSlots.audioFileId),
+  ]);
+
+  const usage = new Map<string, number>();
+  for (const row of [...musicRows, ...oneshotRows]) {
+    if (!row.audioFileId) continue;
+    usage.set(row.audioFileId, (usage.get(row.audioFileId) ?? 0) + row.uses);
+  }
+  return usage;
 }
 
 export async function listCollections(): Promise<Collection[]> {

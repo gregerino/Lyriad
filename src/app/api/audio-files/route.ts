@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { AUDIO_CATEGORIES, getCanonicalMimeType, MAX_AUDIO_UPLOAD_BYTES } from "@/lib/audio/limits";
-import { createAudioFile, listAudioFileCollectionIds, listAudioFiles } from "@/lib/db/queries";
+import {
+  createAudioFile,
+  listAudioFileCollectionIds,
+  listAudioFiles,
+  listAudioFileSlotUsage,
+} from "@/lib/db/queries";
 import { createDownloadUrl } from "@/lib/storage";
 import type { AudioFileWithMeta } from "@/types/domain";
 
@@ -14,15 +19,17 @@ const registerSchema = z.object({
 });
 
 export async function GET() {
-  const [files, collectionIdsByFile] = await Promise.all([
+  const [files, collectionIdsByFile, slotUsageByFile] = await Promise.all([
     listAudioFiles(),
     listAudioFileCollectionIds(),
+    listAudioFileSlotUsage(),
   ]);
   const audioFiles: AudioFileWithMeta[] = await Promise.all(
     files.map(async (file) => ({
       ...file,
       playbackUrl: await createDownloadUrl(file.r2Key),
       collectionIds: collectionIdsByFile.get(file.id) ?? [],
+      slotUsageCount: slotUsageByFile.get(file.id) ?? 0,
     }))
   );
   return NextResponse.json({ audioFiles });
@@ -61,11 +68,13 @@ export async function POST(request: Request) {
   // Shaped exactly like a row from GET, playback URL included, so a caller can
   // drop it straight into the list it already holds instead of re-fetching the
   // whole library to learn one thing it just created. A new file belongs to no
-  // collection yet, which is the only reason that array can be assumed empty.
+  // collection and sits in no slot yet, which is the only reason those two can
+  // be assumed empty.
   const audioFile: AudioFileWithMeta = {
     ...file,
     playbackUrl: await createDownloadUrl(file.r2Key),
     collectionIds: [],
+    slotUsageCount: 0,
   };
 
   return NextResponse.json({ audioFile }, { status: 201 });

@@ -46,7 +46,11 @@ export type AudioFile = {
 
 export type AudioFileWithPlaybackUrl = AudioFile & { playbackUrl: string };
 
-export type AudioFileWithMeta = AudioFileWithPlaybackUrl & { collectionIds: string[] };
+export type AudioFileWithMeta = AudioFileWithPlaybackUrl & {
+  collectionIds: string[];
+  /** Mixer slots pointing at the file — music rows and one-shot pads together. */
+  slotUsageCount: number;
+};
 
 export type Collection = {
   id: string;
