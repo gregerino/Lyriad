@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { LibraryIcon, MixerIcon, PlusIcon, ScenesIcon, StarIcon } from "@/components/ui/icons";
-import type { Scene } from "@/types/domain";
+import { readActiveCampaignId } from "@/lib/activeCampaign";
+import type { Campaign, Scene } from "@/types/domain";
 
-type SceneListItem = Pick<Scene, "id" | "name" | "favorite">;
+type SceneListItem = Pick<Scene, "id" | "name" | "favorite" | "campaignId">;
 
 const NAV_ITEMS = [
   {
@@ -45,7 +46,10 @@ type QuickAccessPanelProps = {
 export function QuickAccessPanel({ open, pathname, onClose }: QuickAccessPanelProps) {
   const router = useRouter();
   const [scenes, setScenes] = useState<SceneListItem[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loaded, setLoaded] = useState(false);
+  /** Which campaign the desk is on, so its favourites lead the list. */
+  const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
 
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -54,11 +58,25 @@ export function QuickAccessPanel({ open, pathname, onClose }: QuickAccessPanelPr
 
   useEffect(() => {
     if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reading the cookie each time the drawer opens; nothing to subscribe to
+    setActiveCampaignId(readActiveCampaignId());
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     let cancelled = false;
     void (async () => {
-      const res = await fetch("/api/scenes").catch(() => null);
-      if (!res?.ok || cancelled) return;
-      const { scenes: rows }: { scenes: SceneListItem[] } = await res.json();
+      const [scenesRes, campaignsRes] = await Promise.all([
+        fetch("/api/scenes").catch(() => null),
+        fetch("/api/campaigns").catch(() => null),
+      ]);
+      if (cancelled) return;
+      if (campaignsRes?.ok) {
+        const { campaigns: rows }: { campaigns: Campaign[] } = await campaignsRes.json();
+        if (!cancelled) setCampaigns(rows);
+      }
+      if (!scenesRes?.ok || cancelled) return;
+      const { scenes: rows }: { scenes: SceneListItem[] } = await scenesRes.json();
       if (cancelled) return;
       setScenes(rows);
       setLoaded(true);
@@ -82,7 +100,11 @@ export function QuickAccessPanel({ open, pathname, onClose }: QuickAccessPanelPr
     }
   }
 
-  const favorites = scenes.filter((s) => s.favorite);
+  const favoriteGroups = groupFavorites(
+    scenes.filter((s) => s.favorite),
+    campaigns,
+    activeCampaignId
+  );
   const sorted = [...scenes].sort((a, b) => a.name.localeCompare(b.name, "sv"));
 
   async function toggleFavorite(id: string, current: boolean) {
@@ -132,11 +154,11 @@ export function QuickAccessPanel({ open, pathname, onClose }: QuickAccessPanelPr
           Scener
         </h2>
 
-        {favorites.length > 0 && (
-          <section className="mt-6">
-            <h3 className="px-1 text-sm text-muted-foreground">Favoriter</h3>
+        {favoriteGroups.map((group) => (
+          <section key={group.id ?? "none"} className="mt-6">
+            <h3 className="px-1 text-sm text-muted-foreground">{group.label}</h3>
             <ul className="mt-2 flex flex-col">
-              {favorites.map((scene) => (
+              {group.scenes.map((scene) => (
                 <SceneRow
                   key={scene.id}
                   scene={scene}
@@ -147,9 +169,11 @@ export function QuickAccessPanel({ open, pathname, onClose }: QuickAccessPanelPr
               ))}
             </ul>
           </section>
-        )}
+        ))}
 
-        <section className={favorites.length > 0 ? "mt-6 border-t border-border pt-6" : "mt-6"}>
+        <section
+          className={favoriteGroups.length > 0 ? "mt-6 border-t border-border pt-6" : "mt-6"}
+        >
           <h3 className="px-1 text-sm text-muted-foreground">Dina scener</h3>
 
           {creating ? (
@@ -249,6 +273,43 @@ export function QuickAccessPanel({ open, pathname, onClose }: QuickAccessPanelPr
       </nav>
     </>
   );
+}
+
+type FavoriteGroup = { id: string | null; label: string; scenes: SceneListItem[] };
+
+/**
+ * Favourites split per campaign, with the one the desk is currently on first —
+ * that shortlist is the one being reached for mid-session. Campaigns without a
+ * favourite are left out; with no campaigns at all this is a single unlabelled
+ * "Favoriter" list, exactly as before.
+ */
+function groupFavorites(
+  favorites: SceneListItem[],
+  campaigns: Campaign[],
+  activeCampaignId: string | null
+): FavoriteGroup[] {
+  if (favorites.length === 0) return [];
+  if (campaigns.length === 0) {
+    return [{ id: null, label: "Favoriter", scenes: favorites }];
+  }
+
+  const ordered = [
+    ...campaigns.filter((c) => c.id === activeCampaignId),
+    ...campaigns.filter((c) => c.id !== activeCampaignId),
+  ];
+
+  const groups: FavoriteGroup[] = ordered.map((campaign) => ({
+    id: campaign.id,
+    label: campaign.name,
+    scenes: favorites.filter((s) => s.campaignId === campaign.id),
+  }));
+  groups.push({
+    id: null,
+    label: "Utan kampanj",
+    scenes: favorites.filter((s) => !s.campaignId),
+  });
+
+  return groups.filter((group) => group.scenes.length > 0);
 }
 
 function SceneRow({

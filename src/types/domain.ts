@@ -62,11 +62,21 @@ export type MixPreset = {
   createdAt: string;
 };
 
+/** A campaign the scenes are grouped under — "Curse of Strahd", "Phandelver". */
+export type Campaign = {
+  id: string;
+  name: string;
+  position: number;
+  createdAt: string;
+};
+
 export type Scene = {
   id: string;
   name: string;
   description: string | null;
   favorite: boolean;
+  /** Null means the scene belongs to no campaign. */
+  campaignId: string | null;
   musicSlots: MusicSlot[];
   oneShotSets: OneShotSet[];
   createdAt: string;

@@ -4,6 +4,7 @@ import { db } from "./index";
 import {
   audioFileCollections,
   audioFiles,
+  campaigns,
   collections,
   sceneMixPresets,
   sceneMusicSlots,
@@ -14,6 +15,7 @@ import {
 import type {
   AudioCategory,
   AudioFile,
+  Campaign,
   Collection,
   MixPreset,
   MusicSlot,
@@ -150,6 +152,7 @@ function toScene(
     name: row.name,
     description: row.description,
     favorite: row.favorite,
+    campaignId: row.campaignId,
     musicSlots: slots.musicSlots,
     oneShotSets: slots.oneShotSets,
     createdAt: row.createdAt.toISOString(),
@@ -157,8 +160,58 @@ function toScene(
   };
 }
 
+function toCampaign(row: typeof campaigns.$inferSelect): Campaign {
+  return {
+    id: row.id,
+    name: row.name,
+    position: row.position,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+export async function listCampaigns(): Promise<Campaign[]> {
+  const rows = await db
+    .select()
+    .from(campaigns)
+    .orderBy(asc(campaigns.position), asc(campaigns.createdAt));
+  return rows.map(toCampaign);
+}
+
+export async function createCampaign(input: { name: string }): Promise<Campaign> {
+  // New campaigns land last in the switcher, the way one is actually started.
+  const [{ next } = { next: 0 }] = await db
+    .select({ next: sql<number>`coalesce(max(${campaigns.position}), -1) + 1` })
+    .from(campaigns);
+
+  const [row] = await db
+    .insert(campaigns)
+    .values({ name: input.name, position: next })
+    .returning();
+  if (!row) throw new Error("Failed to create campaign");
+  return toCampaign(row);
+}
+
+export async function updateCampaign(
+  id: string,
+  patch: { name?: string; position?: number }
+): Promise<Campaign | null> {
+  const [row] = await db.update(campaigns).set(patch).where(eq(campaigns.id, id)).returning();
+  return row ? toCampaign(row) : null;
+}
+
+/** Scenes survive: the foreign key drops them back to "no campaign". */
+export async function deleteCampaign(id: string): Promise<boolean> {
+  const [row] = await db.delete(campaigns).where(eq(campaigns.id, id)).returning({
+    id: campaigns.id,
+  });
+  return !!row;
+}
+
 export async function listScenes(): Promise<
-  Pick<Scene, "id" | "name" | "description" | "favorite" | "createdAt" | "updatedAt">[]
+  Pick<
+    Scene,
+    "id" | "name" | "description" | "favorite" | "campaignId" | "createdAt" | "updatedAt"
+  >[]
 > {
   const rows = await db
     .select({
@@ -166,6 +219,7 @@ export async function listScenes(): Promise<
       name: scenes.name,
       description: scenes.description,
       favorite: scenes.favorite,
+      campaignId: scenes.campaignId,
       createdAt: scenes.createdAt,
       updatedAt: scenes.updatedAt,
     })
@@ -182,6 +236,7 @@ export async function listScenes(): Promise<
 export async function createScene(input: {
   name: string;
   description: string | null;
+  campaignId?: string | null;
 }): Promise<Scene> {
   const id = randomUUID();
   const setId = randomUUID();
@@ -192,7 +247,12 @@ export async function createScene(input: {
   }));
 
   await db.batch([
-    db.insert(scenes).values({ id, name: input.name, description: input.description }),
+    db.insert(scenes).values({
+      id,
+      name: input.name,
+      description: input.description,
+      campaignId: input.campaignId ?? null,
+    }),
     db.insert(sceneMusicSlots).values(musicSlotValues),
     db
       .insert(sceneOneshotSets)
@@ -224,7 +284,12 @@ export async function sceneExists(id: string): Promise<boolean> {
 
 export async function updateScene(
   id: string,
-  patch: { name?: string; description?: string | null; favorite?: boolean }
+  patch: {
+    name?: string;
+    description?: string | null;
+    favorite?: boolean;
+    campaignId?: string | null;
+  }
 ): Promise<Scene | null> {
   const [row] = await db
     .update(scenes)

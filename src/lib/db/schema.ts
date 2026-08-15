@@ -57,11 +57,30 @@ export const audioFileCollections = pgTable(
   (table) => [primaryKey({ columns: [table.audioFileId, table.collectionId] })]
 );
 
+/**
+ * A campaign the scenes are played in — "Curse of Strahd", "Phandelver". Only
+ * a grouping: the desk shows one campaign's favourites at a time, so the tab
+ * bar above the music slots holds the handful of scenes tonight's game needs.
+ */
+export const campaigns = pgTable("campaigns", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  /** Order in the campaign switcher; ties fall back to created_at. */
+  position: smallint("position").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const scenes = pgTable("scenes", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   description: text("description"),
   favorite: boolean("favorite").notNull().default(false),
+  /** Null means the scene belongs to no campaign — it shows under "Utan kampanj". */
+  campaignId: uuid("campaign_id").references(() => campaigns.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

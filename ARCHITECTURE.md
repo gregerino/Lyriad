@@ -59,6 +59,13 @@ Ett enda konto, inget registreringsflöde:
 Alla fyra tabeller i Postgres (Neon), hanterade via Drizzle-migrationer.
 
 ```sql
+CREATE TABLE campaigns (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  position SMALLINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE audio_files (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   filename TEXT NOT NULL,
@@ -74,6 +81,8 @@ CREATE TABLE scenes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   description TEXT,
+  favorite BOOLEAN NOT NULL DEFAULT false,
+  campaign_id UUID REFERENCES campaigns(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -125,6 +134,16 @@ När en scen skapas skapas samtidigt alla 10 musikrader, ett förvalt set och
 dess 20 slot-rader (med `audio_file_id = NULL`) i samma transaktion. Det gör
 att frontend alltid kan förvänta sig fasta arrayer av längd 10/20, utan att
 särskilja "tom plats" från "plats finns inte".
+
+**Kampanjer:** en scen hör till högst en kampanj ("Curse of Strahd",
+"Phandelver and Below"), och kampanjen är enbart en gruppering — flikraden
+ovanför musikplatserna visar favoritscenerna i den kampanj som är vald, så
+kvällens spel slipper de andra kampanjernas genvägar. Vilken kampanj som är
+vald är klient-state (cookien `lyriad_active_campaign`, se
+`src/lib/activeCampaign.ts`), inte databas-state: det är en egenskap hos
+skärmen man spelar från, inte hos datan. `ON DELETE SET NULL` gör att en
+raderad kampanj lämnar sina scener orörda — de faller tillbaka till "utan
+kampanj" istället för att följa med i fallet.
 
 **Loop på one-shots:** `loop` på slot-raden gör att padden spelar tills den
 trycks igen istället för att avfyras en gång — regn, en folkmassa, en eld.
@@ -235,10 +254,15 @@ att kunna mixa flera samtidiga spår med individuell gain/fade:
 POST   /api/auth/login
 POST   /api/auth/logout
 
+GET    /api/campaigns                  Lista kampanjer
+POST   /api/campaigns                  Skapa kampanj
+PATCH  /api/campaigns/:id              Byt namn/ordning
+DELETE /api/campaigns/:id              Radera kampanj (scenerna behålls)
+
 GET    /api/scenes                     Lista scener
 POST   /api/scenes                     Skapa scen (+ alla 30 slot-rader)
 GET    /api/scenes/:id                 Hämta scen + slots
-PATCH  /api/scenes/:id                 Uppdatera namn/beskrivning
+PATCH  /api/scenes/:id                 Uppdatera namn/beskrivning/favorit/kampanj
 DELETE /api/scenes/:id                 Radera scen (cascade slots)
 
 PATCH  /api/scenes/:id/music-slots/:slotIndex     Uppdatera slot (audio_file_id, volym, loop, fade)

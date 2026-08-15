@@ -6,7 +6,7 @@ import { Tooltip } from "@/components/ui/Tooltip";
 import { RenameMenuItem } from "@/components/ui/RenameMenuItem";
 import { MixerIcon, ResetIcon, TrashIcon } from "@/components/ui/icons";
 import type { FadeCurve } from "@/audio-engine";
-import type { MixPreset } from "@/types/domain";
+import type { Campaign, MixPreset } from "@/types/domain";
 
 type CrossfadeOption = { slotIndex: number; label: string };
 
@@ -28,6 +28,10 @@ type MixerMenuProps = {
 
   sceneName: string;
   onRenameScene: (name: string) => void;
+  /** The campaign this scene is filed under — which tabs it appears among. */
+  campaigns: Campaign[];
+  sceneCampaignId: string | null;
+  onSceneCampaignChange: (campaignId: string | null) => void;
   /** Stops everything playing and returns every fader to its default. */
   onResetAudio: () => void;
   onDeleteScene: () => void;
@@ -58,6 +62,9 @@ export function MixerMenu({
   onCrossfade,
   sceneName,
   onRenameScene,
+  campaigns,
+  sceneCampaignId,
+  onSceneCampaignChange,
   onResetAudio,
   onDeleteScene,
   deletingScene,
@@ -295,6 +302,24 @@ export function MixerMenu({
               itemClassName={MENU_ITEM_CLASS}
               label="Byt namn på scenen"
             />
+
+            {campaigns.length > 0 && (
+              <label className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-parchment-200">
+                Kampanj
+                <select
+                  value={sceneCampaignId ?? ""}
+                  onChange={(e) => onSceneCampaignChange(e.target.value || null)}
+                  className={FIELD_CLASS}
+                >
+                  <option value="">Utan kampanj</option>
+                  {campaigns.map((campaign) => (
+                    <option key={campaign.id} value={campaign.id}>
+                      {campaign.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             <button type="button" onClick={onResetAudio} className={MENU_ITEM_CLASS}>
               <ResetIcon className="h-3.5 w-3.5 flex-none" />

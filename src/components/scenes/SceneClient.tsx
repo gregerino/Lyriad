@@ -25,10 +25,12 @@ import {
   SpeakerOnIcon,
   UploadIcon,
 } from "@/components/ui/icons";
+import { writeActiveCampaignId } from "@/lib/activeCampaign";
 import { LAST_SCENE_COOKIE } from "@/lib/lastScene";
 import { useStoredSetting } from "@/lib/useStoredSetting";
 import type {
   AudioFileWithMeta,
+  Campaign,
   Collection,
   MixPreset,
   MusicSlot,
@@ -100,6 +102,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   const [scene, setScene] = useState<Scene | null>(null);
   const [audioFiles, setAudioFiles] = useState<AudioFileWithMeta[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -197,11 +200,12 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   async function fetchAll() {
     setLoadError(null);
     try {
-      const [sceneRes, filesRes, presetsRes, collectionsRes] = await Promise.all([
+      const [sceneRes, filesRes, presetsRes, collectionsRes, campaignsRes] = await Promise.all([
         fetch(`/api/scenes/${sceneId}`),
         fetch("/api/audio-files"),
         fetch(`/api/scenes/${sceneId}/mix-presets`),
         fetch("/api/collections"),
+        fetch("/api/campaigns"),
       ]);
       if (sceneRes.status === 404) {
         setNotFound(true);
@@ -221,6 +225,12 @@ export function SceneClient({ sceneId }: SceneClientProps) {
       if (presetsRes.ok) {
         const { presets } = await presetsRes.json();
         setMixPresets(presets);
+      }
+      // Only feeds the mixer menu's campaign picker; the tab bar fetches its
+      // own list, so losing this costs the menu a dropdown and nothing else.
+      if (campaignsRes.ok) {
+        const { campaigns: campaignRows } = await campaignsRes.json();
+        setCampaigns(campaignRows);
       }
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Kunde inte ladda scenen");
@@ -797,6 +807,23 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     if (!res?.ok) setScene((prev) => (prev ? { ...prev, name: previous } : prev));
   }
 
+  /** Moves the scene between campaigns, which is what its tab bar follows. */
+  async function setSceneCampaign(campaignId: string | null) {
+    const previous = scene?.campaignId;
+    if (previous === undefined || campaignId === previous) return;
+    setScene((prev) => (prev ? { ...prev, campaignId } : prev));
+    if (campaignId) writeActiveCampaignId(campaignId);
+    const res = await fetch(`/api/scenes/${sceneId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId }),
+    }).catch(() => null);
+    if (!res?.ok) {
+      setScene((prev) => (prev ? { ...prev, campaignId: previous } : prev));
+      if (previous) writeActiveCampaignId(previous);
+    }
+  }
+
   /**
    * Back to a neutral desk: silence first, then every fader to its default.
    * Slots already sitting at the default are left alone rather than PATCHed
@@ -1167,7 +1194,11 @@ export function SceneClient({ sceneId }: SceneClientProps) {
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-[100rem] flex-col px-4 py-4 sm:px-6">
       <header className="flex items-center gap-3">
-        <SceneTabs currentSceneId={scene.id} currentSceneName={scene.name} />
+        <SceneTabs
+          currentSceneId={scene.id}
+          currentSceneName={scene.name}
+          currentSceneCampaignId={scene.campaignId}
+        />
 
         <div className="flex flex-none items-center gap-2">
           <Tooltip label="Ljudbibliotek" align="end">
@@ -1226,6 +1257,9 @@ export function SceneClient({ sceneId }: SceneClientProps) {
             }
             sceneName={scene.name}
             onRenameScene={(name) => void renameScene(name)}
+            campaigns={campaigns}
+            sceneCampaignId={scene.campaignId}
+            onSceneCampaignChange={(campaignId) => void setSceneCampaign(campaignId)}
             onResetAudio={resetAudio}
             onDeleteScene={() => void deleteScene()}
             deletingScene={deletingScene}
