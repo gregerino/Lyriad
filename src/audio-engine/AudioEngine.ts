@@ -426,7 +426,15 @@ export class AudioEngine {
 
     let buffer: AudioBuffer;
     try {
-      const res = await fetch(url);
+      // Reloaded rather than read from cache, because the probe above has just
+      // left an entry this fetch must not be given. A media element requests
+      // without an Origin header, and R2 answers such a request with neither
+      // Access-Control-Allow-Origin nor Vary: Origin — so what it leaves in the
+      // cache looks, to the cache, like something a CORS request may reuse.
+      // This fetch is a CORS request: handed that entry it fails the origin
+      // check and throws before the file is ever read, which surfaced as a pad
+      // stuck on "Fel" for every one-shot short enough to be decoded at all.
+      const res = await fetch(url, { cache: "reload" });
       if (!res.ok) throw new Error(`Kunde inte hämta ${name} (${res.status})`);
       buffer = await this.ensureContext().decodeAudioData(await res.arrayBuffer());
     } catch (err) {
