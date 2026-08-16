@@ -65,15 +65,37 @@ type Track = {
   objectUrl: string | null;
 };
 
-type OneShotSlot = {
-  name: string;
+/**
+ * A pad short enough to be worth decoding: only a decoded buffer can overlap
+ * with itself, which is the whole point of a pad hit twice in a row.
+ */
+type DecodedOneShot = {
+  kind: "buffer";
   buffer: AudioBuffer;
   /** Shared by every overlapping instance of this slot, so slot volume affects all of them at once. */
   gainNode: GainNode;
+  activeSources: Set<AudioBufferSourceNode>;
+};
+
+/**
+ * A pad too long to decode, streamed from a media element for the same reason
+ * music is — see Track.element. One instance at a time: a press restarts it
+ * rather than layering a second copy on top, which is what a minutes-long
+ * ambience wants anyway.
+ */
+type StreamedOneShot = {
+  kind: "element";
+  element: HTMLAudioElement;
+  /** Set when the slot owns an object URL (local File) and must revoke it. */
+  objectUrl: string | null;
+};
+
+type OneShotSlot = {
+  name: string;
   volume: number;
   /** Applied to instances as they are triggered, and to those already in flight. */
   loop: boolean;
-  activeSources: Set<AudioBufferSourceNode>;
+  playback: DecodedOneShot | StreamedOneShot;
 };
 
 type Listener = (state: EngineState) => void;
@@ -83,6 +105,50 @@ const FADE_STEP_MS = 25;
 
 /** Bus every one-shot slot routes through, so they share one fader. */
 export const ONESHOT_GROUP_ID = "oneshots";
+
+/**
+ * Past this length a one-shot streams instead of being decoded — the same trap
+ * music slots already dodge (see Track.element). A pad is allowed to hold an
+ * hour of tavern ambience, and decoding one to raw float PCM took the tab down
+ * on iPad while desktop merely swallowed the gigabyte and carried on.
+ *
+ * Twenty seconds is well past anything a pad fires and expects to overlap with
+ * itself, and it caps what a full bank of decoded pads can occupy.
+ */
+const MAX_DECODED_ONESHOT_SECONDS = 20;
+
+/**
+ * Resolves once the element knows what it is holding, so callers can surface a
+ * real failure (bad URL, blocked by CORS, unsupported codec) instead of leaving
+ * a silent slot behind.
+ */
+function awaitElementMetadata(element: HTMLAudioElement, name: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const onLoaded = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error(element.error?.message ?? `Kunde inte ladda ${name}`));
+    };
+    const cleanup = () => {
+      element.removeEventListener("loadedmetadata", onLoaded);
+      element.removeEventListener("error", onError);
+    };
+    element.addEventListener("loadedmetadata", onLoaded);
+    element.addEventListener("error", onError);
+    element.load();
+  });
+}
+
+/** Frees whatever the browser has buffered for an element we are done with. */
+function releaseElement(element: HTMLAudioElement): void {
+  element.pause();
+  // Dropping the src lets the browser release the buffered stream straight away.
+  element.removeAttribute("src");
+  element.load();
+}
 
 /**
  * Framework-agnostic Web Audio playback engine. Owns the AudioContext, one
@@ -223,13 +289,26 @@ export class AudioEngine {
     }
     const oneShots: Record<string, OneShotState> = {};
     for (const [id, slot] of this.oneShots) {
+      const playback = slot.playback;
       oneShots[id] = {
         id,
         name: slot.name,
-        duration: slot.buffer.duration,
+        duration:
+          playback.kind === "buffer"
+            ? playback.buffer.duration
+            : // NaN until the element has metadata; the UI treats 0 as "not known yet".
+              Number.isFinite(playback.element.duration)
+              ? playback.element.duration
+              : 0,
         volume: slot.volume,
         loop: slot.loop,
-        activeCount: slot.activeSources.size,
+        activeCount:
+          playback.kind === "buffer"
+            ? playback.activeSources.size
+            : // A streamed pad has exactly one instance, so it is playing or it isn't.
+              !playback.element.paused && !playback.element.ended
+              ? 1
+              : 0,
       };
     }
 
@@ -264,23 +343,7 @@ export class AudioEngine {
     element.src = url;
 
     try {
-      await new Promise<void>((resolve, reject) => {
-        const onLoaded = () => {
-          cleanup();
-          resolve();
-        };
-        const onError = () => {
-          cleanup();
-          reject(new Error(element.error?.message ?? `Kunde inte ladda ${name}`));
-        };
-        const cleanup = () => {
-          element.removeEventListener("loadedmetadata", onLoaded);
-          element.removeEventListener("error", onError);
-        };
-        element.addEventListener("loadedmetadata", onLoaded);
-        element.addEventListener("error", onError);
-        element.load();
-      });
+      await awaitElementMetadata(element, name);
     } catch (err) {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       throw err;
@@ -325,16 +388,58 @@ export class AudioEngine {
     this.notify();
   }
 
+  /**
+   * Loads `url` into a one-shot pad, decoding it only if it is short enough to
+   * be worth holding as raw samples — see MAX_DECODED_ONESHOT_SECONDS. The
+   * length is read off a media element first precisely so that an oversized
+   * file is never passed to decodeAudioData at all: by the time decoding runs
+   * out of memory, the tab is already gone.
+   */
   async loadOneShot(
     id: string,
     name: string,
-    data: ArrayBuffer,
-    options: { volume?: number; loop?: boolean } = {},
+    url: string,
+    options: { volume?: number; loop?: boolean; objectUrl?: string | null } = {},
   ): Promise<void> {
-    const ctx = this.ensureContext();
-    const buffer = await ctx.decodeAudioData(data);
-    const gainNode = ctx.createGain();
+    const { loop = false, objectUrl = null } = options;
     const volume = Math.min(1, Math.max(0, options.volume ?? 1));
+
+    const element = new Audio();
+    // Metadata only for now: the whole point is to learn the length before
+    // committing to pulling the file down, let alone decoding it.
+    element.preload = "metadata";
+    element.src = url;
+    try {
+      await awaitElementMetadata(element, name);
+    } catch (err) {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      throw err;
+    }
+
+    // An unknown length is treated as "too long": a file whose metadata says
+    // nothing about its duration is exactly the kind we must not decode blind.
+    const duration = element.duration;
+    if (!Number.isFinite(duration) || duration > MAX_DECODED_ONESHOT_SECONDS) {
+      this.commitStreamedOneShot(id, name, element, { volume, loop, objectUrl });
+      return;
+    }
+
+    let buffer: AudioBuffer;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Kunde inte hämta ${name} (${res.status})`);
+      buffer = await this.ensureContext().decodeAudioData(await res.arrayBuffer());
+    } catch (err) {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      throw err;
+    } finally {
+      // The probe has done its job either way; the decoded buffer is the source now.
+      releaseElement(element);
+    }
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+
+    const ctx = this.ensureContext();
+    const gainNode = ctx.createGain();
     gainNode.gain.value = volume;
     // Routed through a shared bus rather than straight to master, so one-shots
     // can be faded as a group independently of the music columns.
@@ -344,34 +449,96 @@ export class AudioEngine {
     if (this.oneShots.has(id)) this.removeOneShotSlot(id);
     this.oneShots.set(id, {
       name,
-      buffer,
-      gainNode,
       volume,
-      loop: options.loop ?? false,
-      activeSources: new Set(),
+      loop,
+      playback: { kind: "buffer", buffer, gainNode, activeSources: new Set() },
     });
     this.notify();
   }
 
+  /** Keeps the probe element as the pad's player rather than throwing it away. */
+  private commitStreamedOneShot(
+    id: string,
+    name: string,
+    element: HTMLAudioElement,
+    options: { volume: number; loop: boolean; objectUrl: string | null },
+  ): void {
+    element.preload = "auto";
+    element.loop = options.loop;
+
+    // A looping element normally restarts itself and never fires "ended" at
+    // all, but it does end when the browser can't pin the media's duration
+    // down — which is one of the two ways a pad lands on this path to begin
+    // with. Winding it back by hand means "loop på" holds in that case too.
+    element.addEventListener("ended", () => {
+      const current = this.oneShots.get(id);
+      // Only for the pad this element still belongs to — a reassigned slot's
+      // old element must not drag the new one's playback along with it.
+      if (current?.playback.kind === "element" && current.playback.element === element) {
+        if (current.loop) {
+          element.currentTime = 0;
+          void element.play().catch(() => this.notify());
+        }
+      }
+      this.notify();
+    });
+
+    // The bus fader is a real GainNode only decoded pads pass through, so a
+    // streamed one folds group and master into its own volume instead.
+    this.ensureGroup(ONESHOT_GROUP_ID);
+    if (this.oneShots.has(id)) this.removeOneShotSlot(id);
+    const slot: OneShotSlot = {
+      name,
+      volume: options.volume,
+      loop: options.loop,
+      playback: { kind: "element", element, objectUrl: options.objectUrl },
+    };
+    this.applyOneShotVolume(slot);
+    this.oneShots.set(id, slot);
+    this.notify();
+  }
+
+  /** Collapses every fader that applies to a streamed pad into the element's own volume. */
+  private applyOneShotVolume(slot: OneShotSlot): void {
+    if (slot.playback.kind !== "element") return;
+    const groupVolume = this.groups.get(ONESHOT_GROUP_ID)?.volume ?? 1;
+    const level = slot.volume * groupVolume * this.masterVolume;
+    slot.playback.element.volume = Math.min(1, Math.max(0, level));
+  }
+
   /**
-   * Fires a brand-new, independent instance of the slot's sound. Never
-   * touches instances already in flight — repeated triggers (even of the
-   * same slot, even before the previous instance finished) overlap freely
-   * and each cleans itself up via onended.
+   * Fires the slot's sound. A decoded pad gets a brand-new, independent
+   * instance and never touches those already in flight — repeated triggers
+   * (even of the same slot, even before the previous instance finished)
+   * overlap freely and each cleans itself up via onended. A streamed pad has
+   * only its one element to give, so a press restarts it instead.
    *
    * A looping slot's instance never ends on its own; stopOneShot is what ends
    * it, which is what the pad's second press does.
    */
   triggerOneShot(id: string): void {
     const slot = this.getOneShotSlot(id);
+    if (slot.playback.kind === "element") {
+      // One instance, so a press restarts the sound instead of layering another
+      // copy over it — the only thing a streamed pad can offer, and what a
+      // minutes-long ambience wants regardless.
+      const { element } = slot.playback;
+      element.loop = slot.loop;
+      element.currentTime = 0;
+      void element.play().catch(() => this.notify());
+      this.notify();
+      return;
+    }
+
+    const { buffer, gainNode, activeSources } = slot.playback;
     const ctx = this.ensureContext();
     const source = ctx.createBufferSource();
-    source.buffer = slot.buffer;
+    source.buffer = buffer;
     source.loop = slot.loop;
-    source.connect(slot.gainNode);
-    slot.activeSources.add(source);
+    source.connect(gainNode);
+    activeSources.add(source);
     source.onended = () => {
-      slot.activeSources.delete(source);
+      activeSources.delete(source);
       source.disconnect();
       this.notify();
     };
@@ -382,12 +549,18 @@ export class AudioEngine {
   /** Stops every instance of this one-shot slot currently in flight, without discarding the slot itself. */
   stopOneShot(id: string): void {
     const slot = this.getOneShotSlot(id);
-    for (const source of slot.activeSources) {
+    if (slot.playback.kind === "element") {
+      slot.playback.element.pause();
+      slot.playback.element.currentTime = 0;
+      this.notify();
+      return;
+    }
+    for (const source of slot.playback.activeSources) {
       source.onended = null;
       source.stop();
       source.disconnect();
     }
-    slot.activeSources.clear();
+    slot.playback.activeSources.clear();
     this.notify();
   }
 
@@ -396,7 +569,11 @@ export class AudioEngine {
     const slot = this.getOneShotSlot(id);
     const clamped = Math.min(1, Math.max(0, volume));
     slot.volume = clamped;
-    slot.gainNode.gain.setValueAtTime(clamped, this.ensureContext().currentTime);
+    if (slot.playback.kind === "element") {
+      this.applyOneShotVolume(slot);
+    } else {
+      slot.playback.gainNode.gain.setValueAtTime(clamped, this.ensureContext().currentTime);
+    }
     this.notify();
   }
 
@@ -409,20 +586,29 @@ export class AudioEngine {
   setOneShotLoop(id: string, loop: boolean): void {
     const slot = this.getOneShotSlot(id);
     slot.loop = loop;
-    for (const source of slot.activeSources) source.loop = loop;
+    if (slot.playback.kind === "element") {
+      slot.playback.element.loop = loop;
+    } else {
+      for (const source of slot.playback.activeSources) source.loop = loop;
+    }
     this.notify();
   }
 
   removeOneShotSlot(id: string): void {
     const slot = this.oneShots.get(id);
     if (!slot) return;
-    for (const source of slot.activeSources) {
-      source.onended = null;
-      source.stop();
-      source.disconnect();
+    if (slot.playback.kind === "element") {
+      releaseElement(slot.playback.element);
+      if (slot.playback.objectUrl) URL.revokeObjectURL(slot.playback.objectUrl);
+    } else {
+      for (const source of slot.playback.activeSources) {
+        source.onended = null;
+        source.stop();
+        source.disconnect();
+      }
+      slot.playback.activeSources.clear();
+      slot.playback.gainNode.disconnect();
     }
-    slot.activeSources.clear();
-    slot.gainNode.disconnect();
     this.oneShots.delete(id);
     this.notify();
   }
@@ -678,13 +864,16 @@ export class AudioEngine {
   setMasterVolume(volume: number): void {
     const clamped = Math.min(1, Math.max(0, volume));
     this.masterVolume = clamped;
-    // One-shots are still a Web Audio graph, so master lives in two places.
+    // Decoded one-shots are still a Web Audio graph, so master lives in two places.
     if (this.masterGain && this.audioContext) {
       const now = this.audioContext.currentTime;
       this.masterGain.gain.cancelScheduledValues(now);
       this.masterGain.gain.setValueAtTime(clamped, now);
     }
     for (const track of this.tracks.values()) this.applyTrackVolume(track);
+    // ...and in a third for a streamed pad, which no more passes through the
+    // master node than a music track does.
+    for (const slot of this.oneShots.values()) this.applyOneShotVolume(slot);
     this.notify();
   }
 
@@ -701,6 +890,9 @@ export class AudioEngine {
     for (const track of this.tracks.values()) {
       if (track.groupId === groupId) this.applyTrackVolume(track);
     }
+    if (groupId === ONESHOT_GROUP_ID) {
+      for (const slot of this.oneShots.values()) this.applyOneShotVolume(slot);
+    }
     this.notify();
   }
 
@@ -708,10 +900,7 @@ export class AudioEngine {
     const track = this.tracks.get(id);
     if (!track) return;
     this.clearFade(track);
-    track.element.pause();
-    // Dropping the src lets the browser release the buffered stream straight away.
-    track.element.removeAttribute("src");
-    track.element.load();
+    releaseElement(track.element);
     if (track.objectUrl) URL.revokeObjectURL(track.objectUrl);
     this.tracks.delete(id);
     this.notify();

@@ -97,9 +97,12 @@ export function useAudioEngine() {
   );
 
   const loadOneShot = useCallback(
-    async (id: string, file: File, options?: { volume?: number; loop?: boolean }) => {
-      const data = await file.arrayBuffer();
-      await engine.loadOneShot(id, file.name, data, options);
+    async (id: string, file: File, options: { volume?: number; loop?: boolean } = {}) => {
+      // Handed over as a URL rather than an ArrayBuffer so the engine can decide
+      // whether this pad is short enough to decode at all — reading a long file
+      // into memory here would already have cost what that check is there to save.
+      const objectUrl = URL.createObjectURL(file);
+      await engine.loadOneShot(id, file.name, objectUrl, { ...options, objectUrl });
     },
     [engine],
   );
@@ -111,10 +114,7 @@ export function useAudioEngine() {
       url: string,
       options?: { volume?: number; loop?: boolean },
     ) => {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Kunde inte hämta ljudfilen (${res.status})`);
-      const data = await res.arrayBuffer();
-      await engine.loadOneShot(id, name, data, options);
+      await engine.loadOneShot(id, name, url, options);
     },
     [engine],
   );

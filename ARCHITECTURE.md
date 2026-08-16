@@ -235,26 +235,41 @@ MinIO:s endpoint/nycklar istället.
 
 ## 5. Ljudmotor (klient, Web Audio API)
 
-`src/audio-engine/` — ingen `<audio>`-tagg, allt går via `AudioContext` för
-att kunna mixa flera samtidiga spår med individuell gain/fade:
+`src/audio-engine/` — flera samtidiga spår med individuell volym/fade, där
+varje spår spelas på det sätt dess längd tål:
 
-- Ett delat `AudioContext` + en master `GainNode`.
-- **Musikspår (10 platser):** varje aktiv plats har en egen `GainNode` →
-  master. Loop hanteras med `AudioBufferSourceNode.loop = true`. Fade
-  in/ut sker med `GainNode.gain.linearRampToValueAtTime`. Flera musikspår
-  kan vara aktiva samtidigt (mixade) eller styras att vara exklusiva,
-  beroende på scenens inställning.
+- Ett delat `AudioContext` + en master `GainNode`, för det som faktiskt går
+  genom Web Audio (de avkodade one-shottarna).
+- **Musikspår (10 platser):** strömmar från ett `HTMLAudioElement` per
+  plats, utanför Web Audio-grafen — `createMediaElementSource` kräver ett
+  CORS-rent svar och en upplåst `AudioContext` för att inte tystna på iOS,
+  och allt musiken behöver är en volymmultiplikator. Loop hanteras med
+  `element.loop`, och fade in/ut trappas från en timer på `element.volume`
+  (`FADE_STEP_MS`) eftersom `volume` inte har någon egen automation. Flera
+  musikspår kan vara aktiva samtidigt (mixade) eller korsfejdas.
 - **One-shots (20 platser per set):** varje klick skapar en ny
   `AudioBufferSourceNode` (fire-and-forget) routad genom en delad
   one-shot-gain → master, så överlappande triggers fungerar utan att
   avbryta varandra. En pad med `loop` sätter `source.loop` på instansen och
   spelar tills padden trycks igen (`stopOneShot`). Padden adresseras med
   `oneshot-<setId>-<slotIndex>`, så ett loopande ljud i ett set fortsätter
-  spela medan ett annat set visas — bara det set som visas avkodas, och det
-  som avkodats ligger kvar så länge scenen är öppen.
-- Ljudfiler decodas till `AudioBuffer` en gång och cachas i minnet
-  (`Map<audioFileId, AudioBuffer>`) för att undvika omdecodning vid varje
-  trigger.
+  spela medan ett annat set visas — bara det set som visas laddas, och det
+  som laddats ligger kvar så länge scenen är öppen.
+- **Långa one-shots strömmar istället för att avkodas.** `decodeAudioData`
+  blåser upp filen till rå float-PCM: en pad med en timmes butiksmiljö i
+  (74 MB mp3) blev 1,39 GB i minnet och tog ner fliken på iPad, medan
+  desktop svalde gigabytet och lät bli att märkas. Motorn läser därför
+  längden från ett `<audio>`-element innan den bestämmer sig, och allt över
+  `MAX_DECODED_ONESHOT_SECONDS` (20 s) — liksom allt vars längd inte går
+  att avgöra — behåller elementet som sin uppspelare istället. En strömmad
+  pad har en instans i taget: ett tryck startar om ljudet istället för att
+  lägga en kopia ovanpå, vilket är vad en minutlång ambiens vill ändå.
+  Under gränsen avkodas padden fortfarande, eftersom bara en avkodad buffer
+  kan överlappa sig själv — hela poängen med en pad man slår två gånger.
+  Elementet ligger utanför Web Audio-grafen precis som musikens, så en
+  strömmad pad viker in grupp- och mastervolymen i sin egen `volume`.
+- Avkodade ljudfiler ligger kvar som `AudioBuffer` så länge scenen är
+  öppen, för att slippa omavkodning vid varje trigger.
 - Ljudmotorn exponerar en imperativ API-yta (`playMusicSlot`,
   `stopMusicSlot`, `triggerOneShot`, `setSlotVolume`, …) som
   state-lagret (Zustand) anropar — motorn äger inget UI-state själv.
