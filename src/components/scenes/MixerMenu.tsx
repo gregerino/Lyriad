@@ -134,7 +134,8 @@ export function MixerMenu({
               Fade
             </h3>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              Vald längd gäller både in och ut när du startar eller pausar allt. 0s växlar direkt.
+              Vald längd gäller både in och ut, för ett enskilt spår som för hela mixen. 0s
+              växlar direkt.
             </p>
             {/* A segmented control rather than tickboxes: the choice is one-of-N,
                 and "no fade" reads better as its own 0s option than as the state

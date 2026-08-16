@@ -8,7 +8,7 @@ export type TrackState = {
   loop: boolean;
   volume: number;
   muted: boolean;
-  /** True while a scheduled fadeIn/fadeOut ramp is in flight. */
+  /** True from the moment a fadeIn/fadeOut is asked for until its ramp lands. */
   fading: boolean;
 };
 
@@ -56,6 +56,11 @@ type Track = {
   /** 0-1 multiplier owned by fadeIn/fadeOut; 1 when no fade has run. */
   fadeGain: number;
   fadeTimer: ReturnType<typeof setInterval> | null;
+  /**
+   * Set while a fade in is holding at silence, waiting for the element to
+   * actually start; calling it drops that wait.
+   */
+  cancelPendingFade: (() => void) | null;
   /** Set when the track owns an object URL (local File) and must revoke it. */
   objectUrl: string | null;
 };
@@ -165,10 +170,16 @@ export class AudioEngine {
     track.element.volume = Math.min(1, Math.max(0, level));
   }
 
-  private clearFadeTimer(track: Track): void {
+  /** Ends whatever fade a track has in flight — a running ramp, or one still waiting to start. */
+  private clearFade(track: Track): void {
     if (track.fadeTimer !== null) {
       clearInterval(track.fadeTimer);
       track.fadeTimer = null;
+    }
+    if (track.cancelPendingFade) {
+      const cancel = track.cancelPendingFade;
+      track.cancelPendingFade = null;
+      cancel();
     }
   }
 
@@ -185,7 +196,7 @@ export class AudioEngine {
       clearTimeout(this.pendingDisposeTimer);
       this.pendingDisposeTimer = null;
       for (const track of this.tracks.values()) {
-        this.clearFadeTimer(track);
+        this.clearFade(track);
         track.fadeGain = 1;
         this.applyTrackVolume(track);
       }
@@ -207,7 +218,7 @@ export class AudioEngine {
         loop: track.element.loop,
         volume: track.volume,
         muted: track.muted,
-        fading: track.fadeTimer !== null,
+        fading: track.fadeTimer !== null || track.cancelPendingFade !== null,
       };
     }
     const oneShots: Record<string, OneShotState> = {};
@@ -306,6 +317,7 @@ export class AudioEngine {
       volume: Math.min(1, Math.max(0, initialVolume)),
       fadeGain: 1,
       fadeTimer: null,
+      cancelPendingFade: null,
       objectUrl,
     };
     this.applyTrackVolume(track);
@@ -415,9 +427,48 @@ export class AudioEngine {
     this.notify();
   }
 
-  /** Starts the element, tolerating the autoplay rejection browsers raise off-gesture. */
-  private startElement(track: Track): void {
-    void track.element.play().catch(() => this.notify());
+  /**
+   * Starts the element, tolerating the autoplay rejection browsers raise off-gesture.
+   *
+   * `onStarted` runs when the first sample is actually audible, which is not
+   * when play() is called: a track the browser still has to buffer — ten slots
+   * of streamed music compete for connections, so "preload" is no guarantee —
+   * can take a second or more to come in. Both the `playing` event and play()'s
+   * own promise mark that moment; whichever lands first wins.
+   */
+  private startElement(track: Track, onStarted?: () => void): void {
+    if (!onStarted) {
+      void track.element.play().catch(() => this.notify());
+      return;
+    }
+
+    const element = track.element;
+    let settled = false;
+    const started = () => {
+      if (settled) return;
+      settled = true;
+      element.removeEventListener("playing", started);
+      track.cancelPendingFade = null;
+      onStarted();
+    };
+
+    track.cancelPendingFade = () => {
+      settled = true;
+      element.removeEventListener("playing", started);
+    };
+    element.addEventListener("playing", started);
+
+    void element.play().then(started, () => {
+      if (settled) return;
+      settled = true;
+      element.removeEventListener("playing", started);
+      track.cancelPendingFade = null;
+      // Nothing is going to play, so the slot must not be left silenced behind
+      // a fade that will never run.
+      track.fadeGain = 1;
+      this.applyTrackVolume(track);
+      this.notify();
+    });
   }
 
   /**
@@ -434,7 +485,7 @@ export class AudioEngine {
     curve: FadeCurve,
     onDone?: () => void,
   ): void {
-    this.clearFadeTimer(track);
+    this.clearFade(track);
     const from = track.fadeGain;
     const duration = Math.max(0, durationMs);
 
@@ -456,7 +507,7 @@ export class AudioEngine {
       this.applyTrackVolume(track);
 
       if (progress >= 1) {
-        this.clearFadeTimer(track);
+        this.clearFade(track);
         track.fadeGain = target;
         this.applyTrackVolume(track);
         onDone?.();
@@ -469,7 +520,7 @@ export class AudioEngine {
   play(id: string): void {
     const track = this.getTrack(id);
     if (!track.element.paused) return;
-    this.clearFadeTimer(track);
+    this.clearFade(track);
     // An instant start always begins at full level, undoing any fade left behind.
     track.fadeGain = 1;
     this.applyTrackVolume(track);
@@ -479,7 +530,7 @@ export class AudioEngine {
 
   pause(id: string): void {
     const track = this.getTrack(id);
-    this.clearFadeTimer(track);
+    this.clearFade(track);
     if (track.element.paused) return;
     track.element.pause();
     this.notify();
@@ -487,7 +538,7 @@ export class AudioEngine {
 
   stop(id: string): void {
     const track = this.getTrack(id);
-    this.clearFadeTimer(track);
+    this.clearFade(track);
     track.fadeGain = 1;
     this.applyTrackVolume(track);
     track.element.pause();
@@ -541,13 +592,19 @@ export class AudioEngine {
     const target = options.targetVolume ?? track.volume;
     const curve = options.curve ?? "linear";
 
-    this.clearFadeTimer(track);
+    this.clearFade(track);
     track.volume = target;
 
     if (track.element.paused) {
       track.fadeGain = 0;
       this.applyTrackVolume(track);
-      this.startElement(track);
+      // Held at silence until playback really begins. Ramping from here instead
+      // would spend the buffering wait fading up nothing, and the track would
+      // arrive already half way in — the reason a fade in could go unheard
+      // while the fade out, on a track long since playing, rang out in full.
+      this.startElement(track, () => this.rampFade(track, 1, durationMs, curve));
+      this.notify();
+      return;
     }
 
     this.rampFade(track, 1, durationMs, curve);
@@ -576,7 +633,12 @@ export class AudioEngine {
     });
   }
 
-  /** Fades `fromId` out and `toId` in over the same duration, in lockstep. */
+  /**
+   * Fades `fromId` out and `toId` in over the same duration. The incoming
+   * track's ramp begins when it is audible rather than when it is asked for,
+   * so a cold track slides in a little behind the outgoing one instead of
+   * appearing mid-fade.
+   */
   crossfade(
     fromId: string,
     toId: string,
@@ -590,7 +652,7 @@ export class AudioEngine {
 
   setVolume(id: string, volume: number): void {
     const track = this.getTrack(id);
-    this.clearFadeTimer(track);
+    this.clearFade(track);
     track.volume = Math.min(1, Math.max(0, volume));
     // Dragging the fader mid-fade is a deliberate override of that fade.
     track.fadeGain = 1;
@@ -645,7 +707,7 @@ export class AudioEngine {
   removeTrack(id: string): void {
     const track = this.tracks.get(id);
     if (!track) return;
-    this.clearFadeTimer(track);
+    this.clearFade(track);
     track.element.pause();
     // Dropping the src lets the browser release the buffered stream straight away.
     track.element.removeAttribute("src");
