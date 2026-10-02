@@ -332,7 +332,9 @@ export class AudioEngine {
     groupId: string,
     options: { volume?: number; loop?: boolean; objectUrl?: string | null } = {},
   ): Promise<void> {
-    const { volume: initialVolume = 1, loop = false, objectUrl = null } = options;
+    // Music repeats unless told otherwise: a track that falls silent mid-session
+    // is the surprise, not one that keeps going.
+    const { volume: initialVolume = 1, loop = true, objectUrl = null } = options;
     const element = new Audio();
     // No crossOrigin: the element never enters the Web Audio graph, so there is
     // nothing to taint, and plain <audio> playback needs no CORS at all.
@@ -361,7 +363,10 @@ export class AudioEngine {
       // Only for the track this element still belongs to — a reassigned slot's
       // old element must not drag the new one's playback along with it.
       if (current?.element === element && element.loop) {
-        element.currentTime = 0;
+        // A source that can't seek (no byte-range support) ignores the rewind,
+        // so reload it instead — that starts from 0 without seeking at all.
+        if (element.seekable.length === 0) element.load();
+        else element.currentTime = 0;
         this.startElement(current);
       }
       this.notify();
