@@ -372,6 +372,14 @@ export class AudioEngine {
       this.notify();
     });
 
+    // "loadedmetadata" is no promise of a length: Safari on iPad hands a streamed
+    // file over with duration still Infinity/NaN and only settles it later. The
+    // length is read off the element on every notify, so the scrubber and the
+    // time left just need telling when it lands — or they stay at 0 for good.
+    element.addEventListener("durationchange", () => {
+      if (this.tracks.get(id)?.element === element) this.notify();
+    });
+
     // Checked right before committing (not before the await above) so that if two
     // loads for the same slot overlap — e.g. a retry click racing the initial load —
     // whichever resolves last still tears down whatever the other one left behind,
@@ -494,6 +502,14 @@ export class AudioEngine {
         }
       }
       this.notify();
+    });
+
+    // As for a music track: a length the browser only pins down after metadata.
+    element.addEventListener("durationchange", () => {
+      const current = this.oneShots.get(id);
+      if (current?.playback.kind === "element" && current.playback.element === element) {
+        this.notify();
+      }
     });
 
     // The bus fader is a real GainNode only decoded pads pass through, so a
