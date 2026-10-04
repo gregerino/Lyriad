@@ -144,32 +144,29 @@ function awaitElementMetadata(element: HTMLAudioElement, name: string): Promise<
   });
 }
 
-/** The last real length seen for each element, for when it stops saying. */
-const lastKnownDuration = new WeakMap<HTMLMediaElement, number>();
+/** The longest length seen for each element, for when it stops saying. */
+const longestKnownDuration = new WeakMap<HTMLMediaElement, number>();
 
 /**
  * An element's length in seconds, NaN while unknown. `duration` is the obvious
  * source but not a dependable one: on iPad it is right at "loadedmetadata" and
- * then drops to 0 once playback starts, and `seekable` can be empty in that
- * same instant before it comes back spanning the whole file. So a real length
- * is remembered once seen, and `duration`, then the end of the last seekable
- * range, then that memory answer in turn. A file's length doesn't change
- * underneath it, so the memory never goes stale.
+ * then collapses to a sliver of a second once playback starts, while
+ * `seekable` goes on spanning the whole file. A file's length can't shrink
+ * underneath it, and nothing can be seekable past its end, so the answer is
+ * the longest of `duration`, the end of the last seekable range and every
+ * length seen before for this element.
  */
 export function mediaDuration(element: HTMLMediaElement): number {
   const { duration, seekable } = element;
-  let length = NaN;
-  if (Number.isFinite(duration) && duration > 0) {
-    length = duration;
-  } else if (seekable.length > 0) {
+  let length = longestKnownDuration.get(element) ?? 0;
+  if (Number.isFinite(duration)) length = Math.max(length, duration);
+  if (seekable.length > 0) {
     const end = seekable.end(seekable.length - 1);
-    if (Number.isFinite(end) && end > 0) length = end;
+    if (Number.isFinite(end)) length = Math.max(length, end);
   }
-  if (!Number.isNaN(length)) {
-    lastKnownDuration.set(element, length);
-    return length;
-  }
-  return lastKnownDuration.get(element) ?? NaN;
+  if (length <= 0) return NaN;
+  longestKnownDuration.set(element, length);
+  return length;
 }
 
 /** Frees whatever the browser has buffered for an element we are done with. */

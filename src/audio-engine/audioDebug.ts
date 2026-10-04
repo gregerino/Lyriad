@@ -38,7 +38,8 @@ function stamp(): string {
 export function formatNumber(value: number): string {
   if (Number.isNaN(value)) return "NaN";
   if (!Number.isFinite(value)) return String(value);
-  return value.toFixed(1);
+  // Enough digits that a sliver of a second does not pass for zero.
+  return value < 10 ? value.toPrecision(3) : value.toFixed(1);
 }
 
 /** Records what the browser reports about an element, event by event. */
