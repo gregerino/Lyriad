@@ -1,3 +1,5 @@
+import { registerDebugElement } from "./audioDebug";
+
 export type FadeCurve = "linear" | "exponential";
 
 export type TrackState = {
@@ -342,6 +344,7 @@ export class AudioEngine {
     // Set before the source is live so a slot restored as looping loops from its
     // very first play, not only once someone touches the toggle.
     element.loop = loop;
+    registerDebugElement(id, name, element);
     element.src = url;
 
     try {
@@ -421,6 +424,7 @@ export class AudioEngine {
     // Metadata only for now: the whole point is to learn the length before
     // committing to pulling the file down, let alone decoding it.
     element.preload = "metadata";
+    registerDebugElement(id, name, element);
     element.src = url;
     try {
       await awaitElementMetadata(element, name);
