@@ -53,13 +53,6 @@ type Track = {
   element: HTMLAudioElement;
   groupId: string;
   muted: boolean;
-  /**
-   * Whether the track starts over at its end. Kept here and carried out by the
-   * "ended" handler, never handed to `element.loop`: with that set, WebKit on
-   * iPad reports a duration of a ten-thousandth of a second once playback
-   * starts, which zeroes the time left and pins the scrubber.
-   */
-  loop: boolean;
   /** Target volume (0-1) — what the slider shows, independent of any fade in flight. */
   volume: number;
   /** 0-1 multiplier owned by fadeIn/fadeOut; 1 when no fade has run. */
@@ -315,7 +308,7 @@ export class AudioEngine {
         // The UI treats 0 as "not known yet".
         duration: mediaDuration(track.element) || 0,
         isPlaying: !track.element.paused && !track.element.ended,
-        loop: track.loop,
+        loop: track.element.loop,
         volume: track.volume,
         muted: track.muted,
         fading: track.fadeTimer !== null || track.cancelPendingFade !== null,
@@ -371,6 +364,9 @@ export class AudioEngine {
     // No crossOrigin: the element never enters the Web Audio graph, so there is
     // nothing to taint, and plain <audio> playback needs no CORS at all.
     element.preload = "auto";
+    // Set before the source is live so a slot restored as looping loops from its
+    // very first play, not only once someone touches the toggle.
+    element.loop = loop;
     registerDebugElement(id, name, element);
     element.src = url;
 
@@ -383,14 +379,16 @@ export class AudioEngine {
 
     this.ensureGroup(groupId);
 
-    // This is where a track loops: the element never has `loop` set (see
-    // Track.loop), so it always ends and is wound back by hand. Otherwise this
-    // just keeps the UI honest about a track that reached its end on its own.
+    // A looping element normally restarts itself and never fires "ended" at all,
+    // but it does end when the browser can't pin the media's duration down (a
+    // stream without a usable length, a file whose metadata says nothing). Winding
+    // it back by hand means "loop på" holds in that case too. Otherwise this just
+    // keeps the UI honest about a track that reached its end on its own.
     element.addEventListener("ended", () => {
       const current = this.tracks.get(id);
       // Only for the track this element still belongs to — a reassigned slot's
       // old element must not drag the new one's playback along with it.
-      if (current?.element === element && current.loop) {
+      if (current?.element === element && element.loop) {
         // A source that can't seek (no byte-range support) ignores the rewind,
         // so reload it instead — that starts from 0 without seeking at all.
         if (element.seekable.length === 0) element.load();
@@ -417,7 +415,6 @@ export class AudioEngine {
       element,
       groupId,
       muted: false,
-      loop,
       volume: Math.min(1, Math.max(0, initialVolume)),
       fadeGain: 1,
       fadeTimer: null,
@@ -514,9 +511,12 @@ export class AudioEngine {
     options: { volume: number; loop: boolean; objectUrl: string | null },
   ): void {
     element.preload = "auto";
+    element.loop = options.loop;
 
-    // This is where a streamed pad loops: like a music track's, its element
-    // never has `loop` set (see Track.loop), so it ends and is wound back here.
+    // A looping element normally restarts itself and never fires "ended" at
+    // all, but it does end when the browser can't pin the media's duration
+    // down — which is one of the two ways a pad lands on this path to begin
+    // with. Winding it back by hand means "loop på" holds in that case too.
     element.addEventListener("ended", () => {
       const current = this.oneShots.get(id);
       // Only for the pad this element still belongs to — a reassigned slot's
@@ -578,6 +578,7 @@ export class AudioEngine {
       // copy over it — the only thing a streamed pad can offer, and what a
       // minutes-long ambience wants regardless.
       const { element } = slot.playback;
+      element.loop = slot.loop;
       element.currentTime = 0;
       void element.play().catch(() => this.notify());
       this.notify();
@@ -640,8 +641,9 @@ export class AudioEngine {
   setOneShotLoop(id: string, loop: boolean): void {
     const slot = this.getOneShotSlot(id);
     slot.loop = loop;
-    // A streamed pad loops through its "ended" handler, which reads slot.loop.
-    if (slot.playback.kind === "buffer") {
+    if (slot.playback.kind === "element") {
+      slot.playback.element.loop = loop;
+    } else {
       for (const source of slot.playback.activeSources) source.loop = loop;
     }
     this.notify();
@@ -806,7 +808,7 @@ export class AudioEngine {
     if (position >= duration) {
       // Landing exactly on the end wraps a looping track; for a one-shot play
       // it means "finished", which stop() already models.
-      if (!track.loop) {
+      if (!track.element.loop) {
         this.stop(id);
         return;
       }
@@ -901,7 +903,7 @@ export class AudioEngine {
 
   setLoop(id: string, loop: boolean): void {
     const track = this.getTrack(id);
-    track.loop = loop;
+    track.element.loop = loop;
     this.notify();
   }
 
