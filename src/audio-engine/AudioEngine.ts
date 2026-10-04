@@ -144,6 +144,22 @@ function awaitElementMetadata(element: HTMLAudioElement, name: string): Promise<
   });
 }
 
+/**
+ * The quietest a media element is ever set to. Measured on iPad (Safari 27):
+ * an element that is silent when playback starts — muted, or at volume 0 as a
+ * fade in holds it — plays on audibly fine but reports a duration and position
+ * of a ten-thousandth of a second, so the time left reads 00:00, seeks are
+ * clamped to that sliver and a looping element rewinds to 0 over and over.
+ * Desktop Safari doesn't do this. One thousandth (-60 dB) is inaudible under
+ * any music worth playing, yet is not silence.
+ */
+const MIN_ELEMENT_VOLUME = 0.001;
+
+/** `level` as a media element volume: clamped to 0-1, never quite silent. */
+function elementVolume(level: number): number {
+  return Math.min(1, Math.max(MIN_ELEMENT_VOLUME, level));
+}
+
 /** The longest length seen for each element, for when it stops saying. */
 const longestKnownDuration = new WeakMap<HTMLMediaElement, number>();
 
@@ -260,7 +276,7 @@ export class AudioEngine {
     const level = track.muted
       ? 0
       : track.volume * track.fadeGain * groupVolume * this.masterVolume;
-    track.element.volume = Math.min(1, Math.max(0, level));
+    track.element.volume = elementVolume(level);
   }
 
   /** Ends whatever fade a track has in flight — a running ramp, or one still waiting to start. */
@@ -558,7 +574,7 @@ export class AudioEngine {
     if (slot.playback.kind !== "element") return;
     const groupVolume = this.groups.get(ONESHOT_GROUP_ID)?.volume ?? 1;
     const level = slot.volume * groupVolume * this.masterVolume;
-    slot.playback.element.volume = Math.min(1, Math.max(0, level));
+    slot.playback.element.volume = elementVolume(level);
   }
 
   /**

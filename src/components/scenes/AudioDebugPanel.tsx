@@ -68,6 +68,27 @@ const VARIANTS: Variant[] = [
       e.muted = true;
     },
   },
+  {
+    label: "F volym 0",
+    setup: (e) => {
+      e.preload = "auto";
+      e.volume = 0;
+    },
+  },
+  {
+    label: "G volym 0.001",
+    setup: (e) => {
+      e.preload = "auto";
+      e.volume = 0.001;
+    },
+  },
+  {
+    label: "H volym 0.01",
+    setup: (e) => {
+      e.preload = "auto";
+      e.volume = 0.01;
+    },
+  },
 ];
 
 /**
