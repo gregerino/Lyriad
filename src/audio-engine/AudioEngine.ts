@@ -144,6 +144,22 @@ function awaitElementMetadata(element: HTMLAudioElement, name: string): Promise<
   });
 }
 
+/**
+ * An element's length in seconds, NaN while unknown. `duration` is the obvious
+ * source but not a dependable one: on iPad it drops to 0 once playback starts,
+ * while `seekable` still spans the whole file — so the end of that range
+ * stands in whenever `duration` has nothing usable to say.
+ */
+function mediaDuration(element: HTMLMediaElement): number {
+  const { duration, seekable } = element;
+  if (Number.isFinite(duration) && duration > 0) return duration;
+  if (seekable.length > 0) {
+    const end = seekable.end(seekable.length - 1);
+    if (Number.isFinite(end) && end > 0) return end;
+  }
+  return NaN;
+}
+
 /** Frees whatever the browser has buffered for an element we are done with. */
 function releaseElement(element: HTMLAudioElement): void {
   element.pause();
@@ -280,8 +296,8 @@ export class AudioEngine {
       tracks[id] = {
         id,
         name: track.name,
-        // NaN until the element has metadata; the UI treats 0 as "not known yet".
-        duration: Number.isFinite(track.element.duration) ? track.element.duration : 0,
+        // The UI treats 0 as "not known yet".
+        duration: mediaDuration(track.element) || 0,
         isPlaying: !track.element.paused && !track.element.ended,
         loop: track.element.loop,
         volume: track.volume,
@@ -298,10 +314,8 @@ export class AudioEngine {
         duration:
           playback.kind === "buffer"
             ? playback.buffer.duration
-            : // NaN until the element has metadata; the UI treats 0 as "not known yet".
-              Number.isFinite(playback.element.duration)
-              ? playback.element.duration
-              : 0,
+            : // The UI treats 0 as "not known yet".
+              mediaDuration(playback.element) || 0,
         volume: slot.volume,
         loop: slot.loop,
         activeCount:
@@ -375,10 +389,9 @@ export class AudioEngine {
       this.notify();
     });
 
-    // "loadedmetadata" is no promise of a length: Safari on iPad hands a streamed
-    // file over with duration still Infinity/NaN and only settles it later. The
-    // length is read off the element on every notify, so the scrubber and the
-    // time left just need telling when it lands — or they stay at 0 for good.
+    // The length can change after "loadedmetadata" — on iPad it drops to 0 once
+    // playback starts (see mediaDuration). It is read off the element on every
+    // notify, so the scrubber and the time left just need telling when it does.
     element.addEventListener("durationchange", () => {
       if (this.tracks.get(id)?.element === element) this.notify();
     });
@@ -435,7 +448,7 @@ export class AudioEngine {
 
     // An unknown length is treated as "too long": a file whose metadata says
     // nothing about its duration is exactly the kind we must not decode blind.
-    const duration = element.duration;
+    const duration = mediaDuration(element);
     if (!Number.isFinite(duration) || duration > MAX_DECODED_ONESHOT_SECONDS) {
       this.commitStreamedOneShot(id, name, element, { volume, loop, objectUrl });
       return;
@@ -779,7 +792,7 @@ export class AudioEngine {
   /** Jumps to `positionSeconds`; gain, fades, mute and loop are unaffected. */
   seek(id: string, positionSeconds: number): void {
     const track = this.getTrack(id);
-    const duration = track.element.duration;
+    const duration = mediaDuration(track.element);
     if (!Number.isFinite(duration)) return;
     let position = Math.min(Math.max(0, positionSeconds), duration);
 
