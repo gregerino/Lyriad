@@ -1,5 +1,3 @@
-import { registerDebugElement } from "./audioDebug";
-
 export type FadeCurve = "linear" | "exponential";
 
 export type TrackState = {
@@ -165,14 +163,15 @@ const longestKnownDuration = new WeakMap<HTMLMediaElement, number>();
 
 /**
  * An element's length in seconds, NaN while unknown. `duration` is the obvious
- * source but not a dependable one: on iPad it is right at "loadedmetadata" and
- * then collapses to a sliver of a second once playback starts, while
- * `seekable` goes on spanning the whole file. A file's length can't shrink
- * underneath it, and nothing can be seekable past its end, so the answer is
- * the longest of `duration`, the end of the last seekable range and every
- * length seen before for this element.
+ * source but not a dependable one: on iPad it collapses to a sliver of a second
+ * once a silent element starts playing (see MIN_ELEMENT_VOLUME, which is what
+ * keeps that from happening), while `seekable` goes on spanning the whole file.
+ * As a backstop, then: a file's length can't shrink underneath it, and nothing
+ * can be seekable past its end, so the answer is the longest of `duration`,
+ * the end of the last seekable range and every length seen before for this
+ * element.
  */
-export function mediaDuration(element: HTMLMediaElement): number {
+function mediaDuration(element: HTMLMediaElement): number {
   const { duration, seekable } = element;
   let length = longestKnownDuration.get(element) ?? 0;
   if (Number.isFinite(duration)) length = Math.max(length, duration);
@@ -383,7 +382,6 @@ export class AudioEngine {
     // Set before the source is live so a slot restored as looping loops from its
     // very first play, not only once someone touches the toggle.
     element.loop = loop;
-    registerDebugElement(id, name, element);
     element.src = url;
 
     try {
@@ -462,7 +460,6 @@ export class AudioEngine {
     // Metadata only for now: the whole point is to learn the length before
     // committing to pulling the file down, let alone decoding it.
     element.preload = "metadata";
-    registerDebugElement(id, name, element);
     element.src = url;
     try {
       await awaitElementMetadata(element, name);

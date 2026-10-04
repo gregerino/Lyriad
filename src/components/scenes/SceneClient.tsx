@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ONESHOT_GROUP_ID, useAudioEngine } from "@/audio-engine";
 import { AudioUploader } from "@/components/audio/AudioUploader";
-import { AudioDebugPanel } from "@/components/scenes/AudioDebugPanel";
 import { MixerMenu } from "@/components/scenes/MixerMenu";
 import { groupKeyOf, OneShotSetTabs, UNGROUPED } from "@/components/scenes/OneShotSetTabs";
 import { SceneArtwork } from "@/components/scenes/SceneArtwork";
@@ -1257,7 +1256,6 @@ export function SceneClient({ sceneId }: SceneClientProps) {
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-[100rem] flex-col px-4 py-4 sm:px-6">
-      <AudioDebugPanel />
       <header className="flex items-center gap-3">
         <SceneTabs
           currentSceneId={scene.id}
