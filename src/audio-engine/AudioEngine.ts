@@ -175,14 +175,21 @@ let fixedElementVolume: boolean | null = null;
  * True where a media element's `volume` can't be set from script — iOS, where
  * it reads 1 whatever it is given. Music there played at full level no matter
  * the slider, and a fade "out" was full level for its whole length followed by
- * a cut. Detected by trying rather than by user agent, since iPadOS passes
- * itself off as a Mac.
+ * a cut.
+ *
+ * Trying it is not enough on its own: iOS 27 on an iPhone 16 Pro Max reads
+ * back whatever volume it was given and still plays at full level. So any
+ * Apple touch device counts too — iPadOS included, which passes itself off
+ * as a Mac and gives itself away only by having a touch screen.
  */
 function elementVolumeIsFixed(): boolean {
   if (fixedElementVolume === null) {
     const probe = new Audio();
     probe.volume = 0.5;
-    fixedElementVolume = probe.volume !== 0.5;
+    const appleTouch =
+      /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    fixedElementVolume = probe.volume !== 0.5 || appleTouch;
   }
   return fixedElementVolume;
 }
