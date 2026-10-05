@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioEngine, type EngineState, type FadeCurve } from "./AudioEngine";
+import { handOffScene, peekLingeringEngine, reclaimScene } from "./sceneHandoff";
 
 const EMPTY_STATE: EngineState = { tracks: {}, oneShots: {}, masterVolume: 1, groups: {} };
 
@@ -11,19 +12,41 @@ const EMPTY_STATE: EngineState = { tracks: {}, oneShots: {}, masterVolume: 1, gr
  */
 const TEARDOWN_FADE_MS = 400;
 
-export function useAudioEngine() {
-  const [engine] = useState(() => new AudioEngine());
+/**
+ * One engine per scene visit — except that a scene opened while its own music
+ * is still lingering from the last visit takes that engine back, so the music
+ * plays on and the desk shows it as it is.
+ */
+export function useAudioEngine(sceneId: string, sceneName: string | undefined) {
+  // Peeked rather than taken here: React may run this initializer twice, and
+  // both runs must land on the same engine. The subscribe effect claims it.
+  const [engine] = useState(() => peekLingeringEngine(sceneId) ?? new AudioEngine());
   const [state, setState] = useState<EngineState>(EMPTY_STATE);
+  // Read at unmount, by which time the scene has long since loaded its name.
+  const sceneNameRef = useRef(sceneName);
+  useEffect(() => {
+    sceneNameRef.current = sceneName;
+  }, [sceneName]);
 
   useEffect(() => {
+    reclaimScene(engine);
     const unsubscribe = engine.subscribe(setState);
     return () => {
       unsubscribe();
+      if (engine.isAnyTrackPlaying()) {
+        // Leaving a scene with music on keeps the music: it plays on until the
+        // next scene starts its own. Pads belong to the desk being left.
+        engine.removeAllOneShots();
+        handOffScene(sceneId, sceneNameRef.current ?? "föregående scen", engine);
+        return;
+      }
       // Navigating away unmounts the scene, which is the only thing that ends
       // playback wholesale — so it fades out instead of cutting.
       engine.disposeWithFade(TEARDOWN_FADE_MS);
     };
-  }, [engine]);
+  }, [engine, sceneId]);
+
+  const getTrackSource = useCallback((id: string) => engine.getTrackSource(id), [engine]);
 
   const loadTrack = useCallback(
     async (
@@ -45,7 +68,7 @@ export function useAudioEngine() {
       name: string,
       url: string,
       groupId: string,
-      options: { volume?: number; loop?: boolean } = {},
+      options: { volume?: number; loop?: boolean; sourceKey?: string } = {},
     ) => {
       await engine.loadTrack(id, name, url, groupId, options);
     },
@@ -137,6 +160,7 @@ export function useAudioEngine() {
     groups: state.groups,
     loadTrack,
     loadTrackFromUrl,
+    getTrackSource,
     play,
     pause,
     stop,

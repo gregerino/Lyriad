@@ -63,6 +63,12 @@ type Track = {
   cancelPendingFade: (() => void) | null;
   /** Set when the track owns an object URL (local File) and must revoke it. */
   objectUrl: string | null;
+  /**
+   * What the caller says this track is playing (e.g. an audio file id), so a
+   * scene taking back an engine it left playing can tell which slots already
+   * hold the right file and must not be reloaded out from under the music.
+   */
+  sourceKey: string | null;
 };
 
 /**
@@ -370,11 +376,16 @@ export class AudioEngine {
     name: string,
     url: string,
     groupId: string,
-    options: { volume?: number; loop?: boolean; objectUrl?: string | null } = {},
+    options: {
+      volume?: number;
+      loop?: boolean;
+      objectUrl?: string | null;
+      sourceKey?: string | null;
+    } = {},
   ): Promise<void> {
     // Music repeats unless told otherwise: a track that falls silent mid-session
     // is the surprise, not one that keeps going.
-    const { volume: initialVolume = 1, loop = true, objectUrl = null } = options;
+    const { volume: initialVolume = 1, loop = true, objectUrl = null, sourceKey = null } = options;
     const element = new Audio();
     // No crossOrigin: the element never enters the Web Audio graph, so there is
     // nothing to taint, and plain <audio> playback needs no CORS at all.
@@ -434,6 +445,7 @@ export class AudioEngine {
       fadeTimer: null,
       cancelPendingFade: null,
       objectUrl,
+      sourceKey,
     };
     this.applyTrackVolume(track);
     this.tracks.set(id, track);
@@ -962,6 +974,27 @@ export class AudioEngine {
       for (const slot of this.oneShots.values()) this.applyOneShotVolume(slot);
     }
     this.notify();
+  }
+
+  /** The `sourceKey` a track was loaded with, or null if there is no such track. */
+  getTrackSource(id: string): string | null {
+    return this.tracks.get(id)?.sourceKey ?? null;
+  }
+
+  /** True while any music track is audible or about to be. */
+  isAnyTrackPlaying(): boolean {
+    for (const track of this.tracks.values()) {
+      if (!track.element.paused) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Drops every one-shot pad and everything still sounding from them, leaving
+   * the music alone — what a scene keeps when it is left playing.
+   */
+  removeAllOneShots(): void {
+    for (const id of [...this.oneShots.keys()]) this.removeOneShotSlot(id);
   }
 
   removeTrack(id: string): void {

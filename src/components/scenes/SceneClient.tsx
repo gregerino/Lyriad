@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ONESHOT_GROUP_ID, useAudioEngine } from "@/audio-engine";
+import { fadeOutLingeringScene, ONESHOT_GROUP_ID, useAudioEngine } from "@/audio-engine";
 import { AudioUploader } from "@/components/audio/AudioUploader";
 import { MixerMenu } from "@/components/scenes/MixerMenu";
 import { groupKeyOf, OneShotSetTabs, UNGROUPED } from "@/components/scenes/OneShotSetTabs";
@@ -26,6 +26,7 @@ import {
   UploadIcon,
 } from "@/components/ui/icons";
 import { writeActiveCampaignId } from "@/lib/activeCampaign";
+import { FADE_SETTING_KEY } from "@/lib/fadeSetting";
 import { LAST_SCENE_COOKIE } from "@/lib/lastScene";
 import { useStoredSetting } from "@/lib/useStoredSetting";
 import type {
@@ -56,10 +57,9 @@ const DEFAULT_BUS_VOLUME = 1;
 const DEFAULT_SLOT_VOLUME = 0.8;
 
 /**
- * Both of these are how the user likes to work rather than anything about a
- * particular scene, so they follow the browser rather than the scene row.
+ * How the user likes to work rather than anything about a particular scene,
+ * so it follows the browser rather than the scene row — like FADE_SETTING_KEY.
  */
-const FADE_SETTING_KEY = "lyriad:fade-duration-ms";
 const EMPTY_PADS_SETTING_KEY = "lyriad:show-empty-oneshots";
 /** Which one-shot set this scene was left on, per browser. */
 const ACTIVE_SET_KEY = (sceneId: string) => `lyriad:oneshot-set:${sceneId}`;
@@ -170,6 +170,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     masterVolume,
     groups,
     loadTrackFromUrl,
+    getTrackSource,
     loadOneShotFromUrl,
     play,
     pause,
@@ -190,7 +191,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     setOneShotVolume,
     setOneShotLoop,
     removeOneShotSlot,
-  } = useAudioEngine();
+  } = useAudioEngine(sceneId, scene?.name);
 
   /**
    * Falls back to the first set whenever the remembered one is gone — preferring
@@ -347,7 +348,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
         file.filename,
         file.playbackUrl,
         musicGroupId(slotIndex),
-        { volume, loop }
+        { volume, loop, sourceKey: audioFileId }
       );
       setMusicLoadState((prev) => ({ ...prev, [slotIndex]: { status: "loaded" } }));
     } catch {
@@ -396,7 +397,14 @@ export function SceneClient({ sceneId }: SceneClientProps) {
       if (slot.audioFileId) {
         if (loadedMusicRef.current[slot.slotIndex] !== slot.audioFileId) {
           loadedMusicRef.current[slot.slotIndex] = slot.audioFileId;
-          void loadMusicAudio(slot.slotIndex, slot.audioFileId, slot.volume, slot.loop);
+          if (getTrackSource(trackId) === slot.audioFileId) {
+            // Already in the engine — this scene was left playing and has taken
+            // its music back. Reloading would cut it off mid-bar.
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors what the engine already holds; the load path below sets the same state, only asynchronously
+            setMusicLoadState((prev) => ({ ...prev, [slot.slotIndex]: { status: "loaded" } }));
+          } else {
+            void loadMusicAudio(slot.slotIndex, slot.audioFileId, slot.volume, slot.loop);
+          }
         }
       } else if (loadedMusicRef.current[slot.slotIndex]) {
         delete loadedMusicRef.current[slot.slotIndex];
@@ -734,10 +742,19 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     setMuted(musicTrackId(slotIndex), muted);
   }
 
+  /**
+   * Music still playing from the scene left before this one gives way the
+   * moment this scene starts music of its own, over the same fade.
+   */
+  function handOverFromPreviousScene() {
+    fadeOutLingeringScene(fadeDurationMs ?? 0);
+  }
+
   // The ticked fade length is a property of the scene, not of one button — every
   // way of starting or stopping music honours it, master row and slot alike.
   function startMusic(slotIndex: number) {
     const trackId = musicTrackId(slotIndex);
+    handOverFromPreviousScene();
     if (fadeDurationMs) fadeIn(trackId, fadeDurationMs);
     else play(trackId);
   }
@@ -766,6 +783,7 @@ export function SceneClient({ sceneId }: SceneClientProps) {
     );
     if (!loaded || loaded.length === 0) return;
     const anyPlaying = loaded.some((s) => tracks[musicTrackId(s.slotIndex)]?.isPlaying);
+    if (!anyPlaying) handOverFromPreviousScene();
     for (const s of loaded) {
       const trackId = musicTrackId(s.slotIndex);
       if (anyPlaying) {
@@ -1315,9 +1333,10 @@ export function SceneClient({ sceneId }: SceneClientProps) {
               slotIndex: s.slotIndex,
               label: s.name ?? `Musikplats ${s.slotIndex}`,
             }))}
-            onCrossfade={(from, to, durationMs, curve) =>
-              crossfade(musicTrackId(from), musicTrackId(to), durationMs, { curve })
-            }
+            onCrossfade={(from, to, durationMs, curve) => {
+              handOverFromPreviousScene();
+              crossfade(musicTrackId(from), musicTrackId(to), durationMs, { curve });
+            }}
             sceneName={scene.name}
             onRenameScene={(name) => void renameScene(name)}
             campaigns={campaigns}

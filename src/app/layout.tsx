@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Cinzel, Geist_Mono, Inter } from "next/font/google";
 import { AppHeader } from "@/components/nav/AppHeader";
+import { LingeringMusicBar } from "@/components/nav/LingeringMusicBar";
 import { PageTransition } from "@/components/nav/PageTransition";
 import "./globals.css";
 
@@ -37,6 +38,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <AppHeader />
+        <LingeringMusicBar />
         <PageTransition>{children}</PageTransition>
       </body>
     </html>
