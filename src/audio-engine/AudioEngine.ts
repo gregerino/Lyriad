@@ -41,12 +41,13 @@ type Track = {
    * decodeAudioData inflates a file to raw float PCM — a 74 MB, 65-minute
    * track becomes ~1.4 GB in memory, which kills the tab outright on iPad.
    *
-   * The element is also left out of the Web Audio graph entirely and driven by
-   * its own `volume`. Routing it through createMediaElementSource costs nothing
-   * on desktop but is a well-known source of silence on iOS: the node needs a
-   * CORS-clean response to avoid being muted as tainted media, and it depends
-   * on an AudioContext unlocked by a user gesture. Neither risk buys us
-   * anything here — every effect music needs is a volume multiplier.
+   * Where it can, the element stays out of the Web Audio graph and is driven
+   * by its own `volume`. Routing it through createMediaElementSource is a
+   * well-known source of silence on iOS: the node needs a CORS-clean response
+   * to avoid being muted as tainted media, and it depends on an AudioContext
+   * unlocked by a user gesture. iOS is also exactly where `volume` can't be
+   * set, though, so there the graph is the only way to a level — see
+   * levelGain, and routeElement for how those two risks are met.
    */
   element: HTMLAudioElement;
   groupId: string;
@@ -69,6 +70,8 @@ type Track = {
    * hold the right file and must not be reloaded out from under the music.
    */
   sourceKey: string | null;
+  /** Carries the track's level where the element's own volume can't — see elementVolumeIsFixed. */
+  levelGain: GainNode | null;
 };
 
 /**
@@ -94,6 +97,8 @@ type StreamedOneShot = {
   element: HTMLAudioElement;
   /** Set when the slot owns an object URL (local File) and must revoke it. */
   objectUrl: string | null;
+  /** As Track.levelGain. */
+  levelGain: GainNode | null;
 };
 
 type OneShotSlot = {
@@ -163,6 +168,30 @@ const MIN_ELEMENT_VOLUME = 0.001;
 function elementVolume(level: number): number {
   return Math.min(1, Math.max(MIN_ELEMENT_VOLUME, level));
 }
+
+let fixedElementVolume: boolean | null = null;
+
+/**
+ * True where a media element's `volume` can't be set from script — iOS, where
+ * it reads 1 whatever it is given. Music there played at full level no matter
+ * the slider, and a fade "out" was full level for its whole length followed by
+ * a cut. Detected by trying rather than by user agent, since iPadOS passes
+ * itself off as a Mac.
+ */
+function elementVolumeIsFixed(): boolean {
+  if (fixedElementVolume === null) {
+    const probe = new Audio();
+    probe.volume = 0.5;
+    fixedElementVolume = probe.volume !== 0.5;
+  }
+  return fixedElementVolume;
+}
+
+/**
+ * Smoothing for a routed element's level. A gain set outright clicks; fades
+ * step every FADE_STEP_MS, and this keeps each step from being heard as one.
+ */
+const LEVEL_SMOOTHING_SECONDS = 0.015;
 
 /** The longest length seen for each element, for when it stops saying. */
 const longestKnownDuration = new WeakMap<HTMLMediaElement, number>();
@@ -234,11 +263,68 @@ export class AudioEngine {
       this.masterGain = this.audioContext.createGain();
       this.masterGain.gain.value = this.masterVolume;
       this.masterGain.connect(this.audioContext.destination);
+      if (elementVolumeIsFixed()) {
+        // Web Audio on iOS falls silent with the ringer switch, which a media
+        // element never did — and with music routed through the graph, music
+        // would now go with it. "playback" is what a media player asks for.
+        const session = (navigator as Navigator & { audioSession?: { type: string } })
+          .audioSession;
+        if (session) session.type = "playback";
+      }
     }
-    if (this.audioContext.state === "suspended") {
+    // iOS adds "interrupted" (a call, another app taking the audio) to the
+    // suspended state; either way only a resume brings it back.
+    const state: string = this.audioContext.state;
+    if (state === "suspended" || state === "interrupted") {
       void this.audioContext.resume();
     }
     return this.audioContext;
+  }
+
+  /**
+   * Gives a media element a GainNode of its own to carry its level, where the
+   * element's `volume` won't (see elementVolumeIsFixed); null everywhere else,
+   * which keeps the element out of the graph as before.
+   *
+   * The node goes straight to the destination, not through master: the level
+   * it is given already has every fader folded in, as element.volume does.
+   * The element must have been loaded with crossOrigin set, or the graph
+   * receives it as tainted media and plays silence.
+   */
+  private routeElement(element: HTMLAudioElement, level: number): GainNode | null {
+    if (!elementVolumeIsFixed()) return null;
+    const ctx = this.ensureContext();
+    const gain = ctx.createGain();
+    gain.gain.value = Math.max(0, level);
+    ctx.createMediaElementSource(element).connect(gain);
+    gain.connect(ctx.destination);
+    return gain;
+  }
+
+  /** Sets a media element's level through whichever of the two carries it. */
+  private setElementLevel(
+    element: HTMLAudioElement,
+    levelGain: GainNode | null,
+    level: number,
+  ): void {
+    if (levelGain && this.audioContext) {
+      levelGain.gain.setTargetAtTime(
+        Math.max(0, level),
+        this.audioContext.currentTime,
+        LEVEL_SMOOTHING_SECONDS,
+      );
+      return;
+    }
+    element.volume = elementVolume(level);
+  }
+
+  /**
+   * A routed element plays into the graph, so the graph has to be running —
+   * and iOS only lets it start from a user gesture, which is where every play
+   * comes from.
+   */
+  private wakeGraphFor(levelGain: GainNode | null): void {
+    if (levelGain) this.ensureContext();
   }
 
   private getTrack(id: string): Track {
@@ -275,13 +361,14 @@ export class AudioEngine {
     return group.gainNode;
   }
 
-  /** Collapses every fader that applies to a music track into the element's own volume. */
+  /** Collapses every fader that applies to a music track into the one level the element plays at. */
   private applyTrackVolume(track: Track): void {
+    this.setElementLevel(track.element, track.levelGain, this.trackLevel(track));
+  }
+
+  private trackLevel(track: Track): number {
     const groupVolume = this.groups.get(track.groupId)?.volume ?? 1;
-    const level = track.muted
-      ? 0
-      : track.volume * track.fadeGain * groupVolume * this.masterVolume;
-    track.element.volume = elementVolume(level);
+    return track.muted ? 0 : track.volume * track.fadeGain * groupVolume * this.masterVolume;
   }
 
   /** Ends whatever fade a track has in flight — a running ramp, or one still waiting to start. */
@@ -387,8 +474,9 @@ export class AudioEngine {
     // is the surprise, not one that keeps going.
     const { volume: initialVolume = 1, loop = true, objectUrl = null, sourceKey = null } = options;
     const element = new Audio();
-    // No crossOrigin: the element never enters the Web Audio graph, so there is
-    // nothing to taint, and plain <audio> playback needs no CORS at all.
+    // Only an element that will enter the Web Audio graph needs CORS (see
+    // routeElement); plain <audio> playback needs none, so nothing else asks.
+    if (elementVolumeIsFixed()) element.crossOrigin = "anonymous";
     element.preload = "auto";
     // Set before the source is live so a slot restored as looping loops from its
     // very first play, not only once someone touches the toggle.
@@ -446,7 +534,9 @@ export class AudioEngine {
       cancelPendingFade: null,
       objectUrl,
       sourceKey,
+      levelGain: null,
     };
+    track.levelGain = this.routeElement(element, this.trackLevel(track));
     this.applyTrackVolume(track);
     this.tracks.set(id, track);
     this.notify();
@@ -469,6 +559,9 @@ export class AudioEngine {
     const volume = Math.min(1, Math.max(0, options.volume ?? 1));
 
     const element = new Audio();
+    // A long pad keeps this element as its player, and on iOS routes it into
+    // the graph — which needs it loaded with CORS from the start.
+    if (elementVolumeIsFixed()) element.crossOrigin = "anonymous";
     // Metadata only for now: the whole point is to learn the length before
     // committing to pulling the file down, let alone decoding it.
     element.preload = "metadata";
@@ -564,15 +657,17 @@ export class AudioEngine {
     });
 
     // The bus fader is a real GainNode only decoded pads pass through, so a
-    // streamed one folds group and master into its own volume instead.
+    // streamed one folds group and master into its own level instead.
     this.ensureGroup(ONESHOT_GROUP_ID);
     if (this.oneShots.has(id)) this.removeOneShotSlot(id);
-    const slot: OneShotSlot = {
-      name,
-      volume: options.volume,
-      loop: options.loop,
-      playback: { kind: "element", element, objectUrl: options.objectUrl },
+    const playback: StreamedOneShot = {
+      kind: "element",
+      element,
+      objectUrl: options.objectUrl,
+      levelGain: null,
     };
+    const slot: OneShotSlot = { name, volume: options.volume, loop: options.loop, playback };
+    playback.levelGain = this.routeElement(element, this.oneShotLevel(slot));
     this.applyOneShotVolume(slot);
     this.oneShots.set(id, slot);
     this.notify();
@@ -581,9 +676,12 @@ export class AudioEngine {
   /** Collapses every fader that applies to a streamed pad into the element's own volume. */
   private applyOneShotVolume(slot: OneShotSlot): void {
     if (slot.playback.kind !== "element") return;
+    this.setElementLevel(slot.playback.element, slot.playback.levelGain, this.oneShotLevel(slot));
+  }
+
+  private oneShotLevel(slot: OneShotSlot): number {
     const groupVolume = this.groups.get(ONESHOT_GROUP_ID)?.volume ?? 1;
-    const level = slot.volume * groupVolume * this.masterVolume;
-    slot.playback.element.volume = elementVolume(level);
+    return slot.volume * groupVolume * this.masterVolume;
   }
 
   /**
@@ -602,7 +700,8 @@ export class AudioEngine {
       // One instance, so a press restarts the sound instead of layering another
       // copy over it — the only thing a streamed pad can offer, and what a
       // minutes-long ambience wants regardless.
-      const { element } = slot.playback;
+      const { element, levelGain } = slot.playback;
+      this.wakeGraphFor(levelGain);
       element.loop = slot.loop;
       element.currentTime = 0;
       void element.play().catch(() => this.notify());
@@ -679,6 +778,7 @@ export class AudioEngine {
     if (!slot) return;
     if (slot.playback.kind === "element") {
       releaseElement(slot.playback.element);
+      slot.playback.levelGain?.disconnect();
       if (slot.playback.objectUrl) URL.revokeObjectURL(slot.playback.objectUrl);
     } else {
       for (const source of slot.playback.activeSources) {
@@ -703,6 +803,7 @@ export class AudioEngine {
    * own promise mark that moment; whichever lands first wins.
    */
   private startElement(track: Track, onStarted?: () => void): void {
+    this.wakeGraphFor(track.levelGain);
     if (!onStarted) {
       void track.element.play().catch(() => this.notify());
       return;
@@ -1002,6 +1103,7 @@ export class AudioEngine {
     if (!track) return;
     this.clearFade(track);
     releaseElement(track.element);
+    track.levelGain?.disconnect();
     if (track.objectUrl) URL.revokeObjectURL(track.objectUrl);
     this.tracks.delete(id);
     this.notify();
